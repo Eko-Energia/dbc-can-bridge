@@ -1,11 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import './style.css';
 
-const API_URL = process.env.NODE_ENV === 'production' 
-  ? process.env.REACT_APP_API_URL || '/api' // In production, use relative path
-  : 'http://localhost:8000';  // In development, use localhost
+const API_URL = 'http://localhost:8000';
 
 console.log("Using API URL:", API_URL);
 
@@ -16,13 +14,18 @@ function App() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  // Fetch available race sessions
+  const [speedHistory, setSpeedHistory] = useState([]);
+  const [energyConsumptionHistory, setEnergyConsumptionHistory] = useState([]);
+  // Flaga do śledzenia, czy komponent jest zamontowany
+  const isMounted = useRef(true);
+  // Referencja do ostatniego dashboardData, aby zachować dane nawet w przypadku błędu
+  const lastDashboardData = useRef(null);
+  
+  // Funkcja do pobierania sesji
   useEffect(() => {
     const fetchSessions = async () => {
       try {
-        setLoading(true);
-        console.log("Fetching from:", `${API_URL}/race-sessions/`);
+        console.log("Fetching sessions...");
         const response = await fetch(`${API_URL}/race-sessions/`);
         
         if (!response.ok) {
@@ -33,48 +36,157 @@ function App() {
         console.log("Received sessions:", data);
         setSessions(data);
         
-        // Set first session as active if available
+        // Ustaw pierwszą dostępną sesję jako aktywną, jeśli nie wybrano żadnej
         if (data.length > 0 && !sessionId) {
           setSessionId(data[0].id);
         }
       } catch (error) {
         console.error('Error fetching sessions:', error);
-        setError('Failed to load race sessions. Check API connection.');
+        // Nie ustawiaj błędu jako stanu - tylko zaloguj
       } finally {
         setLoading(false);
       }
     };
 
     fetchSessions();
+    // Nie ustawiaj interwału dla fetchSessions - to pobieramy tylko raz
   }, []);
 
-  // Fetch dashboard data and events
+  // Funkcja do pobierania danych dashboardu
   useEffect(() => {
     if (!sessionId) return;
     
+    let isActive = true; // Flaga kontrolująca, czy komponent jest aktywny
+    
+    // Funkcja do pobierania danych
     const fetchDashboardData = async () => {
+      if (!isActive) return; // Nie wykonuj, jeśli komponent został odmontowany
+      
       try {
-        const [dashboardResponse, eventsResponse] = await Promise.all([
-          axios.get(`${API_URL}/dashboard/${sessionId}`),
-          axios.get(`${API_URL}/events/${sessionId}?limit=5`)
-        ]);
+        console.log("Pobieranie danych dla sesji:", sessionId, "czas:", new Date().toISOString());
         
-        setDashboardData(dashboardResponse.data);
-        setEvents(eventsResponse.data);
-      } catch (err) {
-        console.error('Failed to fetch dashboard data:', err);
+        // Pobierz dane dashboardu
+        const dashboardResponse = await axios.get(`${API_URL}/dashboard/${sessionId}`);
+        
+        if (isActive) {
+          setDashboardData(dashboardResponse.data);
+          lastDashboardData.current = dashboardResponse.data;
+          if (error) setError(null);
+        }
+        
+        // Pozyskaj dane historii prędkości
+        try {
+          const speedHistoryResponse = await axios.get(`${API_URL}/telemetry/history/${sessionId}?minutes=10&metric=speed`);
+          if (isActive && speedHistoryResponse.data && speedHistoryResponse.data.length > 0) {
+            setSpeedHistory(speedHistoryResponse.data.map(item => ({
+              time: new Date(item.timestamp).toLocaleTimeString(),
+              value: item.speed
+            })));
+          }
+        } catch (historyError) {
+          console.warn('Nie udało się pobrać historii prędkości:', historyError);
+        }
+        
+        // Pozyskaj dane historii zużycia energii
+        try {
+          const energyHistoryResponse = await axios.get(`${API_URL}/telemetry/history/${sessionId}?minutes=10&metric=energy_consumption`);
+          if (isActive && energyHistoryResponse.data && energyHistoryResponse.data.length > 0) {
+            setEnergyConsumptionHistory(energyHistoryResponse.data.map(item => ({
+              time: new Date(item.timestamp).toLocaleTimeString(),
+              value: item.energy_consumption
+            })));
+          }
+        } catch (energyHistoryError) {
+          console.warn('Nie udało się pobrać historii zużycia energii:', energyHistoryError);
+        }
+        
+        // Pobierz wydarzenia
+        try {
+          const eventsResponse = await axios.get(`${API_URL}/events/${sessionId}?limit=5`);
+          if (isActive) {
+            setEvents(eventsResponse.data);
+          }
+        } catch (eventError) {
+          console.warn('Nie udało się pobrać wydarzeń:', eventError);
+        }
+        
+      } catch (error) {
+        console.error('Błąd pobierania danych dashboardu:', error);
+        
+        // Zachowaj poprzednie dane, jeśli istnieją
+        if (isActive && lastDashboardData.current) {
+          // Nie aktualizuj stanu błędu za każdym razem - tylko w konsoli
+          console.warn("Używam poprzednich danych z powodu błędu połączenia");
+        }
       }
     };
     
+    // Natychmiast pobierz dane
     fetchDashboardData();
     
-    // Poll for updates
+    // Ustaw częstsze odświeżanie - co 3 sekundy zamiast 8
     const interval = setInterval(fetchDashboardData, 1000);
-    return () => clearInterval(interval);
-  }, [sessionId]);
+    
+    // Funkcja czyszcząca
+    return () => {
+      isActive = false; // Oznacz komponent jako nieaktywny
+      clearInterval(interval); // Zatrzymaj interwał
+    };
+  }, [sessionId, API_URL, error]);
 
+  // Ustaw flagę czyszczącą przy odmontowaniu komponentu
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  // Obsługa zmiany sesji
   const handleSessionChange = (e) => {
-    setSessionId(Number(e.target.value));
+    const newSessionId = e.target.value ? parseInt(e.target.value) : null;
+    setSessionId(newSessionId);
+  };
+
+  // Ręczne odświeżanie danych
+  const refreshData = () => {
+    if (sessionId) {
+      setLoading(true);
+      
+      Promise.all([
+        axios.get(`${API_URL}/dashboard/${sessionId}`),
+        axios.get(`${API_URL}/events/${sessionId}?limit=5`),
+        axios.get(`${API_URL}/telemetry/history/${sessionId}?minutes=10&metric=speed`),
+        axios.get(`${API_URL}/telemetry/history/${sessionId}?minutes=10&metric=energy_consumption`) // Dodaj to zapytanie
+      ])
+      .then(([dashboardResponse, eventsResponse, speedHistoryResponse, energyHistoryResponse]) => {
+        setDashboardData(dashboardResponse.data);
+        setEvents(eventsResponse.data);
+        
+        if (speedHistoryResponse.data && speedHistoryResponse.data.length > 0) {
+          setSpeedHistory(speedHistoryResponse.data.map(item => ({
+            time: new Date(item.timestamp).toLocaleTimeString(),
+            value: item.speed
+          })));
+        }
+        
+        // Dodaj przetwarzanie danych zużycia energii
+        if (energyHistoryResponse.data && energyHistoryResponse.data.length > 0) {
+          setEnergyConsumptionHistory(energyHistoryResponse.data.map(item => ({
+            time: new Date(item.timestamp).toLocaleTimeString(),
+            value: item.energy_consumption
+          })));
+        }
+        
+        setError(null);
+      })
+      .catch(error => {
+        console.error('Error during manual refresh:', error);
+        setError(`Nie można odświeżyć danych: ${error.message}`);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+    }
   };
 
   if (loading) {
@@ -89,14 +201,23 @@ function App() {
     <div className="app">
       <header className="header">
         <h1>EV Racing Dashboard</h1>
-        <select value={sessionId || ''} onChange={handleSessionChange}>
-          <option value="">Select Race Session</option>
-          {sessions.map(session => (
-            <option key={session.id} value={session.id}>
-              {session.name} ({session.status})
-            </option>
-          ))}
-        </select>
+        <div className="controls">
+          <select 
+            value={sessionId || ''} 
+            onChange={handleSessionChange}
+            className="session-select"
+          >
+            <option value="">Wybierz sesję wyścigową</option>
+            {sessions.map(session => (
+              <option key={session.id} value={session.id}>
+                {session.name} ({session.status})
+              </option>
+            ))}
+          </select>
+          <button onClick={refreshData} className="refresh-btn">
+            🔄 Odśwież dane
+          </button>
+        </div>
         <button className="settings-btn">⚙️</button>
       </header>
 
@@ -118,10 +239,13 @@ function App() {
               </div>
               <div className="speed-chart">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={[...Array(10)].map((_, i) => ({
-                    time: i,
-                    value: Math.random() * 20 + dashboardData.avg_speed - 10
-                  }))}>
+                  <LineChart data={speedHistory.length > 0 ? speedHistory : 
+                    // Dane zastępcze jeśli nie ma historii
+                    [...Array(10)].map((_, i) => ({
+                      time: i.toString(),
+                      value: Math.random() * 20 + (dashboardData?.avg_speed || 0)
+                    }))
+                  }>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" hide />
                     <YAxis domain={['auto', 'auto']} hide />
@@ -129,7 +253,7 @@ function App() {
                     <Line type="monotone" dataKey="value" stroke="#10B981" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
-                <div className="chart-label">Czas okrążenia</div>
+                <div className="chart-label">Prędkość (ostatnie 10 min)</div>
               </div>
             </div>
           </section>
@@ -156,9 +280,9 @@ function App() {
               </div>
               <div className="data-group">
                 <div className="data-label">Napięcie ogniw</div>
-                <div className="data-value">{dashboardData.battery_voltage.current}V</div>
+                <div className="data-value">{dashboardData.battery_voltage.current.toFixed(2)}V</div>
                 <div className="data-subtext">
-                  min: {dashboardData.battery_voltage.min}V | max: {dashboardData.battery_voltage.max}V
+                  min: {dashboardData.battery_voltage.min.toFixed(2)}V | max: {dashboardData.battery_voltage.max.toFixed(2)}V
                 </div>
               </div>
             </div>
@@ -210,10 +334,13 @@ function App() {
               </div>
               <div className="energy-chart">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={[...Array(10)].map((_, i) => ({
-                    time: i,
-                    value: Math.random() * 30 + dashboardData.energy_consumption - 15
-                  }))}>
+                  <LineChart data={energyConsumptionHistory.length > 0 ? energyConsumptionHistory : 
+                    // Dane zastępcze jeśli nie ma historii
+                    [...Array(10)].map((_, i) => ({
+                      time: i.toString(),
+                      value: Math.random() * 30 + dashboardData.energy_consumption - 15
+                    }))
+                  }>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" hide />
                     <YAxis domain={['auto', 'auto']} hide />
@@ -221,7 +348,7 @@ function App() {
                     <Line type="monotone" dataKey="value" stroke="#F59E0B" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
-                <div className="chart-label">Czas</div>
+                <div className="chart-label">Zużycie energii (ostatnie 10 min)</div>
               </div>
             </div>
           </section>

@@ -540,6 +540,42 @@ async def get_dashboard_data(session_id: int):
     
     return dashboard_data
 
+@app.get("/telemetry/history/{session_id}")
+async def get_telemetry_history(
+    session_id: int,
+    minutes: int = 10,
+    metric: str = "speed"
+):
+    """Get historical telemetry data for the specified metric"""
+    try:
+        # Build InfluxDB query
+        client = get_influxdb_client()
+        query_api = client.query_api()
+        
+        query = f'''
+        from(bucket: "{INFLUXDB_BUCKET}")
+            |> range(start: -{minutes}m)
+            |> filter(fn: (r) => r["_measurement"] == "telemetry")
+            |> filter(fn: (r) => r["race_session_id"] == "{session_id}")
+            |> filter(fn: (r) => r["_field"] == "{metric}")
+            |> yield(name: "mean")
+        '''
+        
+        result = query_api.query(query=query, org=INFLUXDB_ORG)
+        
+        # Format results
+        data = []
+        for table in result:
+            for record in table.records:
+                data.append({
+                    "timestamp": record.get_time().isoformat(),
+                    metric: record.get_value()
+                })
+        
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving telemetry history: {str(e)}")
+
 # System Events
 @app.post("/events/", response_model=SystemEventResponse)
 async def record_system_event(event: SystemEventCreate):
