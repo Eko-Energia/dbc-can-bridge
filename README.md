@@ -1,4 +1,3 @@
-# filepath: c:\Users\kacpe\informatyk\projekty\Perla-Monitor\README.md
 # Perla Monitor - EV Racing Dashboard
 
 A real-time monitoring dashboard for electric vehicle racing teams.
