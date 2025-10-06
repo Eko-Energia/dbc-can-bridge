@@ -1,3 +1,5 @@
+mod config;
+
 use color_eyre::eyre::Result;
 use embedded_can::{StandardId, Id, Frame as FrameTrait, blocking::Can};
 use std::{time::Duration, thread};
@@ -6,14 +8,24 @@ use waveshare_usb_can_a as ws;
 fn main() -> Result<()> {
     color_eyre::install()?;
 
+    // Initialize configuration
+    config::init_config()?;
+    
+    // Get settings from configuration
+    let device_port = config::get_device_port()?;
+    let can_baud_rate = config::get_can_baud_rate()?;
+    
+    println!("Using device: {}", device_port);
+    println!("CAN speed: {:?}", can_baud_rate);
+
     // CAN configuration
-    let config = ws::Usb2CanConfiguration::new(ws::CanBaudRate::R500kBd)
+    let ws_config = ws::Usb2CanConfiguration::new(can_baud_rate)
         .set_loopback(false)
         .set_silent(false)
         .set_automatic_retransmission(true);
 
     // Initialize connection - using builder pattern
-    let mut device = ws::sync::new("/dev/ttyUSB0", &config)
+    let mut device = ws::sync::new(&device_port, &ws_config)
         .open()?;
 
     println!("Starting to send CAN frames...");
