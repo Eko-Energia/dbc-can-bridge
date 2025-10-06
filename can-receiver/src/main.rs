@@ -1,7 +1,7 @@
 mod config;
 
 use color_eyre::eyre::Result;
-use embedded_can::{StandardId, Id, Frame as FrameTrait, blocking::Can};
+use embedded_can::{Frame as FrameTrait, blocking::Can};
 use std::{time::Duration, thread};
 use waveshare_usb_can_a as ws;
 
@@ -21,47 +21,31 @@ fn main() -> Result<()> {
     // CAN configuration
     let ws_config = ws::Usb2CanConfiguration::new(can_baud_rate)
         .set_loopback(false)
-        .set_silent(false)
-        .set_automatic_retransmission(true);
+        .set_silent(false);  // Enable receiving frames from the bus
 
-    // Initialize connection - using builder pattern
+    // Initialize connection with receive timeout
     let mut device = ws::sync::new(&device_port, &ws_config)
+        .set_serial_receive_timeout(Duration::from_millis(1000))
         .open()?;
 
-    println!("Starting to send CAN frames...");
+    println!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
 
-    let mut counter: u32 = 0;
     loop {
-        // Create a CAN frame with ID 0x123 and data
-        let data = [
-            (counter >> 24) as u8,
-            (counter >> 16) as u8,
-            (counter >> 8) as u8,
-            counter as u8,
-            0xAA,
-            0xBB,
-            0xCC,
-            0xDD,
-        ];
-
-        let frame = ws::Frame::new(
-            Id::Standard(StandardId::new(0x123).unwrap()),
-            &data
-        ).unwrap();
-
-        // Send the frame
-        match device.transmit(&frame) {
-            Ok(_) => {
-                println!("Sent frame #{}: {}", counter, frame);
+        match device.receive() {
+            Ok(frame) => {
+                println!("Frame: ID={:?}, Data={:?}", frame.id(), frame.data());
             }
+            
+            Err(ws::sync::Error::SerialReadTimedOut) => {
+                // Timeout - normal case, continue listening
+                println!("Timeout - no frame received, continuing...");
+                continue;
+            }
+            
             Err(e) => {
-                eprintln!("Error while sending frame: {}", e);
+                eprintln!("Error receiving frame: {}", e);
+                thread::sleep(Duration::from_millis(100));
             }
         }
-
-        counter = counter.wrapping_add(1);
-        
-        // 100ms delay between frames
-        thread::sleep(Duration::from_millis(100));
     }
 }
