@@ -25,14 +25,13 @@ fn main() -> Result<()> {
 
     // Initialize connection with receive timeout
     let mut device = ws::sync::new(&device_port, &ws_config)
-        .set_serial_receive_timeout(Duration::from_millis(1000))
+        .set_serial_receive_timeout(Duration::from_millis(10000))
         .open()?;
 
 
     // If a DBC was loaded, report how many messages are available
     if let Some(map) = config::get_dbc_message_name_map() {
         println!("DBC loaded: {} message definitions available", map.len());
-        println!("{:?}", map);
     }
 
     println!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
