@@ -28,6 +28,13 @@ fn main() -> Result<()> {
         .set_serial_receive_timeout(Duration::from_millis(1000))
         .open()?;
 
+
+    // If a DBC was loaded, report how many messages are available
+    if let Some(map) = config::get_dbc_message_name_map() {
+        println!("DBC loaded: {} message definitions available", map.len());
+        println!("{:?}", map);
+    }
+
     println!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
 
     loop {
