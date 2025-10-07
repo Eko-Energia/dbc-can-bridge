@@ -1,0 +1,1 @@
+Purpose: to read raw file from jetson and show in grafana or in frontend

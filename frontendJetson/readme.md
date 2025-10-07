@@ -1,0 +1,1 @@
+Show critical errors in car panel.

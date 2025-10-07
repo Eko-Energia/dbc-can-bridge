@@ -1,0 +1,1 @@
+To show information from the database in a human-readable way.

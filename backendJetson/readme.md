@@ -1,0 +1,1 @@
+Purpose: to select interesting data to aggregate or send wirelessly.
