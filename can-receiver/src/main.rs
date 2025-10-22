@@ -1,9 +1,15 @@
 mod config;
 
 use color_eyre::eyre::Result;
-use embedded_can::{Frame as FrameTrait, blocking::Can};
-use std::{time::Duration, thread};
+use embedded_can::{blocking::Can, Frame as FrameTrait, Id};
 use waveshare_usb_can_a as ws;
+
+fn id_to_u32(id: &Id) -> u32 {
+    match id {
+        Id::Standard(sid) => sid.as_raw() as u32,
+        Id::Extended(eid) => eid.as_raw(),
+    }
+}
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -25,14 +31,8 @@ fn main() -> Result<()> {
 
     // Initialize connection with receive timeout
     let mut device = ws::sync::new(&device_port, &ws_config)
-        .set_serial_receive_timeout(Duration::from_millis(10000))
+        // .set_serial_receive_timeout(Duration::from_millis(10000))
         .open()?;
-
-
-    // If a DBC was loaded, report how many messages are available
-    if let Some(map) = config::get_dbc_message_name_map() {
-        println!("DBC loaded: {} message definitions available", map.len());
-    }
 
     println!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
 
@@ -40,6 +40,7 @@ fn main() -> Result<()> {
         match device.receive() {
             Ok(frame) => {
                 println!("Frame: ID={:?}, Data={:?}", frame.id(), frame.data());
+                // ID dostajemy w decimalu i w DBC jest tak samo (a na CANie w hex, ale nevemind)
             }
             
             Err(ws::sync::Error::SerialReadTimedOut) => {
@@ -50,7 +51,7 @@ fn main() -> Result<()> {
             
             Err(e) => {
                 eprintln!("Error receiving frame: {}", e);
-                thread::sleep(Duration::from_millis(100));
+                // thread::sleep(Duration::from_millis(100));
             }
         }
     }

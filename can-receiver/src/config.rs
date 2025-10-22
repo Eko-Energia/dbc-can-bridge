@@ -6,9 +6,6 @@ use std::{
 };
 use waveshare_usb_can_a::CanBaudRate;
 use color_eyre::eyre::{Result, eyre};
-use canparse::dbc::DbcLibrary;
-use canparse::dbc::{nom as dbc_nom, Entry as DbcEntry};
-use std::collections::HashMap;
 use std::ffi::OsStr;
 
 const CONFIG_FILE_NAME: &str = "config.txt";
@@ -161,10 +158,6 @@ fn format_can_baud_rate(rate: CanBaudRate) -> &'static str {
 
 /// Global singleton for storing configuration in memory
 static CONFIG: OnceLock<Mutex<Config>> = OnceLock::new();
-/// Global singleton for loaded DBC library (if any was found and parsed)
-static DBC_LIBRARY: OnceLock<DbcLibrary> = OnceLock::new();
-/// Optional map of Message ID -> Message Name parsed from the DBC for quick lookups
-static DBC_MESSAGE_NAME_MAP: OnceLock<HashMap<u32, String>> = OnceLock::new();
 
 /// Initializes configuration (call once at program start)
 pub fn init_config() -> Result<()> {
@@ -172,35 +165,46 @@ pub fn init_config() -> Result<()> {
     CONFIG.set(Mutex::new(config))
         .map_err(|_| eyre!("Configuration has already been initialized"))?;
 
-    // Try to auto-load the first .dbc file placed next to the compiled binary.
-    // If none is found or parsing fails, we just continue without DBC.
-    if DBC_LIBRARY.get().is_none() {
-        if let Some(dbc_path) = find_first_dbc_in_exe_dir()? {
-            // Step 1: Fix BO_ lines in DBC file in place (overwrite original)
-            fix_dbc_bo_names(&dbc_path)?;
-            // Step 2: Use the fixed file for further processing
-            match DbcLibrary::from_dbc_file(&dbc_path) {
-                Ok(lib) => {
-                    let _ = DBC_LIBRARY.set(lib);
-                    if let Ok(map) = build_message_name_map(&dbc_path) {
-                        let _ = DBC_MESSAGE_NAME_MAP.set(map);
-                    }
-                    println!("Loaded DBC: {}", dbc_path.display());
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Failed to parse DBC file at {}: {}. Decoding by DBC will be disabled.",
-                        dbc_path.display(),
-                        e
-                    );
-                }
+    Ok(())
+}
+
+/// Returns device path
+pub fn get_device_port() -> Result<String> {
+    let config = CONFIG.get()
+        .ok_or_else(|| eyre!("Configuration not initialized. Call init_config() first."))?
+        .lock()
+        .map_err(|_| eyre!("Configuration access error"))?;
+    
+    Ok(config.device_port.clone())
+}
+
+/// Returns CAN speed
+pub fn get_can_baud_rate() -> Result<CanBaudRate> {
+    let config = CONFIG.get()
+        .ok_or_else(|| eyre!("Configuration not initialized. Call init_config() first."))?
+        .lock()
+        .map_err(|_| eyre!("Configuration access error"))?;
+    
+    Ok(config.can_baud_rate)
+}
+
+/// Attempts to find the first .dbc file in the same directory as the running binary.
+/// Returns Ok(None) if none found.
+fn find_first_dbc_in_exe_dir() -> Result<Option<PathBuf>> {
+    let mut exe_dir = std::env::current_exe()?;
+    exe_dir.pop();
+
+    if let Ok(read_dir) = fs::read_dir(&exe_dir) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension() == Some(OsStr::new("dbc")) {
+                return Ok(Some(path))
             }
-        } else {
-            println!(
-                "No .dbc file found next to the binary. Running without DBC-based decoding."
-            );
         }
     }
+
+    Ok(None)
+}
 
 /// Fixes BO_ lines in a DBC file: removes single underscores in frame names (does not touch double underscores or other sections).
 /// Overwrites the original file in place.
@@ -253,80 +257,4 @@ fn fix_dbc_bo_names(path: &PathBuf) -> Result<()> {
     }
     std::fs::write(path, out)?;
     Ok(())
-}
-    Ok(())
-}
-
-/// Returns device path
-pub fn get_device_port() -> Result<String> {
-    let config = CONFIG.get()
-        .ok_or_else(|| eyre!("Configuration not initialized. Call init_config() first."))?
-        .lock()
-        .map_err(|_| eyre!("Configuration access error"))?;
-    
-    Ok(config.device_port.clone())
-}
-
-/// Returns CAN speed
-pub fn get_can_baud_rate() -> Result<CanBaudRate> {
-    let config = CONFIG.get()
-        .ok_or_else(|| eyre!("Configuration not initialized. Call init_config() first."))?
-        .lock()
-        .map_err(|_| eyre!("Configuration access error"))?;
-    
-    Ok(config.can_baud_rate)
-}
-
-/// Returns a reference to the loaded DBC library, if available.
-/// Note: Returns `None` when no .dbc was found or parsing failed during init.
-pub fn get_dbc_library() -> Option<&'static DbcLibrary> {
-    DBC_LIBRARY.get()
-}
-
-/// Returns a map of Message ID -> Message Name parsed from the loaded DBC, if any.
-pub fn get_dbc_message_name_map() -> Option<&'static HashMap<u32, String>> {
-    DBC_MESSAGE_NAME_MAP.get()
-}
-
-/// Attempts to find the first .dbc file in the same directory as the running binary.
-/// Returns Ok(None) if none found.
-fn find_first_dbc_in_exe_dir() -> Result<Option<PathBuf>> {
-    let mut exe_dir = std::env::current_exe()?;
-    exe_dir.pop();
-
-    if let Ok(read_dir) = fs::read_dir(&exe_dir) {
-        for entry in read_dir.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension() == Some(OsStr::new("dbc")) {
-                return Ok(Some(path))
-            }
-        }
-    }
-
-    Ok(None)
-}
-
-/// Parses the given DBC file and builds a map of Message ID -> Message Name.
-fn build_message_name_map(path: &PathBuf) -> Result<HashMap<u32, String>> {
-    let data = fs::read_to_string(path)?;
-    let mut i = data.as_str();
-    let mut map: HashMap<u32, String> = HashMap::new();
-
-    while !i.is_empty() {
-        match dbc_nom::entry(i) {
-            Ok((new_i, entry)) => {
-                if let DbcEntry::MessageDefinition(def) = entry {
-                    map.insert(def.id, def.name);
-                }
-                i = new_i;
-            }
-            Err(nom_err) => {
-                // Similar recovery strategy to DbcLibrary: advance by one char on error
-                let _ = nom_err;
-                i = &i[1..];
-            }
-        }
-    }
-
-    Ok(map)
 }
