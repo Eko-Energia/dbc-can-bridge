@@ -190,7 +190,7 @@ pub fn get_can_baud_rate() -> Result<CanBaudRate> {
 
 /// Attempts to find the first .dbc file in the same directory as the running binary.
 /// Returns Ok(None) if none found.
-fn find_first_dbc_in_exe_dir() -> Result<Option<PathBuf>> {
+pub fn find_first_dbc_in_exe_dir() -> Result<Option<PathBuf>> {
     let mut exe_dir = std::env::current_exe()?;
     exe_dir.pop();
 
@@ -204,57 +204,4 @@ fn find_first_dbc_in_exe_dir() -> Result<Option<PathBuf>> {
     }
 
     Ok(None)
-}
-
-/// Fixes BO_ lines in a DBC file: removes single underscores in frame names (does not touch double underscores or other sections).
-/// Overwrites the original file in place.
-fn fix_dbc_bo_names(path: &PathBuf) -> Result<()> {
-    let data = std::fs::read_to_string(path)?;
-    let mut out = String::with_capacity(data.len());
-    for line in data.lines() {
-        if line.trim_start().starts_with("BO_") {
-            // BO_ <id> <name>: ...
-            let mut parts = line.splitn(4, ' ');
-            let bo = parts.next();
-            let id = parts.next();
-            let name_colon = parts.next();
-            let rest = parts.next();
-            if let (Some(bo), Some(id), Some(name_colon)) = (bo, id, name_colon) {
-                // name_colon: e.g. LightsFL_END:
-                let name = name_colon.trim_end_matches(':').to_string();
-                // Remove single underscores only if surrounded by non-underscore characters
-                let mut fixed = String::with_capacity(name.len());
-                let name_bytes = name.as_bytes();
-                let mut i = 0;
-                while i < name_bytes.len() {
-                    if name_bytes[i] == b'_'
-                        && i > 0 && i + 1 < name_bytes.len()
-                        && name_bytes[i - 1] != b'_' && name_bytes[i + 1] != b'_' {
-                        // Skip this character (remove _)
-                        i += 1;
-                        continue;
-                    }
-                    fixed.push(name_bytes[i] as char);
-                    i += 1;
-                }
-                // Reconstruct the line
-                out.push_str(bo);
-                out.push(' ');
-                out.push_str(id);
-                out.push(' ');
-                out.push_str(&fixed);
-                out.push(':');
-                if let Some(rest) = rest {
-                    out.push(' ');
-                    out.push_str(rest);
-                }
-                out.push('\n');
-                continue;
-            }
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    std::fs::write(path, out)?;
-    Ok(())
 }
