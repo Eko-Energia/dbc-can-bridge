@@ -7,6 +7,4 @@ we wszystkich ramkach tutaj wyświetlają mi się wartości w systemie dziesięt
 
 wartość rzeczywista = wartość bitowa * A - B
 
-gdzie A to Factor(gain), a B to Offset 
-
-zrób mi dekodowanie tych ramek tak by była nazwa tego co mi przychodzi a po niej wartość
+gdzie A to Factor(gain), a B to Offset

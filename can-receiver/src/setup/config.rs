@@ -6,7 +6,6 @@ use std::{
 };
 use waveshare_usb_can_a::CanBaudRate;
 use color_eyre::eyre::{Result, eyre};
-use std::ffi::OsStr;
 
 const CONFIG_FILE_NAME: &str = "config.txt";
 
@@ -186,22 +185,4 @@ pub fn get_can_baud_rate() -> Result<CanBaudRate> {
         .map_err(|_| eyre!("Configuration access error"))?;
     
     Ok(config.can_baud_rate)
-}
-
-/// Attempts to find the first .dbc file in the same directory as the running binary.
-/// Returns Ok(None) if none found.
-pub fn find_first_dbc_in_exe_dir() -> Result<Option<PathBuf>> {
-    let mut exe_dir = std::env::current_exe()?;
-    exe_dir.pop();
-
-    if let Ok(read_dir) = fs::read_dir(&exe_dir) {
-        for entry in read_dir.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension() == Some(OsStr::new("dbc")) {
-                return Ok(Some(path))
-            }
-        }
-    }
-
-    Ok(None)
 }
