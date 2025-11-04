@@ -39,15 +39,16 @@ fn main() -> Result<()> {
 
     println!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
 
-    let mut name;
-    let mut value;
-    let mut unit;
+    let mut msg_name;
+    let mut signals;
 
     loop {
         match device.receive() {
             Ok(frame) => {
-                (name, value, unit) = dbc.decode(frame);
-                println!("{}: {} {}", name, value, unit);
+                (msg_name, signals) = dbc.decode(frame).unwrap();
+                println!("{}:", msg_name);
+                signals.iter().for_each(
+                    |s| println!("  {}: {} {}", s.name, s.value, s.unit));
             }
             
             Err(ws::sync::Error::SerialReadTimedOut) => {

@@ -4,6 +4,13 @@ use embedded_can::{Frame as FrameTrait, Id};
 use waveshare_usb_can_a::Frame;
 use can_dbc::{Dbc};
 
+#[derive(Debug)]
+pub struct SignalValue<'a> {
+    pub name: &'a str,
+    pub value: f64,
+    pub unit: &'a String,
+}
+
 pub struct DbcHandler {
     pub dbc: Dbc,
     message_index_by_id: HashMap<u32, usize>
@@ -30,27 +37,59 @@ impl DbcHandler {
         })
     }
 
-    pub fn decode(&self, frame: Frame) -> (&String, f64, &String) {
+    pub fn decode(&'_ self, frame: Frame) -> Option<(&'_ String, Vec<SignalValue<'_>>)> {
         let idx = *self.message_index_by_id
-            .get(&id_to_u32(&frame.id()))
-            .unwrap();
+            .get(&id_to_u32(&frame.id()))?;
 
         let message = self.dbc.messages()
-            .get(idx)
-            .unwrap();
+            .get(idx)?;
 
-        let signal = message
-            .signals()
-            .iter()
-            .next()
-            .unwrap();
+        if frame.data().is_empty() || frame.data().len() > 8 {
+            return None;
+        }
 
-        let data = connect_bytes(frame.data()).unwrap();
+        let mut loading = false;
+        let mut results: Vec<SignalValue> = Vec::new();
+        let mut value: u64 = 0;
 
-        // finally decoding part
-        let result = data * signal.factor() - signal.offset();
+        for (i, signal) in message.signals().iter().enumerate() {
+            let byte = *frame.data().get(i)?;
+            
+            match (loading, signal.name()) {
+                (false, name) if name.ends_with('H') => {
+                    loading = true;
+                    value = byte as u64;
+                }
+                (false, _) => {
+                    // a single byte value
+                    let result = (byte as f64) * signal.factor() - signal.offset();
+                    // add to a vector
+                    results.push(SignalValue {
+                        name: signal.name(),
+                        value: result,
+                        unit: signal.unit(),
+                    });
+                }
+                (true, name) if name.ends_with('L') => {
+                    // decode collected value
+                    loading = false;
+                    value = (value << 8) | (byte as u64);
+                    let result = (value as f64) * signal.factor() - signal.offset();
+                    // add to a vector
+                    results.push(SignalValue {
+                        name: &name[..name.len() - 2],
+                        value: result,
+                        unit: signal.unit(),
+                    });
+                }
+                (true, _) => {
+                    // load more bytes if in loading
+                    value = (value << 8) | (byte as u64);
+                }
+            }
+        }
 
-        (message.name(), result, signal.unit())
+        Some((message.name(), results))
     }
 }
 
@@ -78,16 +117,6 @@ fn id_to_u32(id: &Id) -> u32 {
     }
 }
 
-fn connect_bytes(data: &[u8]) -> Option<f64> {
-    if data.is_empty() || data.len() > 8 {
-        return None;
-    }
-    let mut value: u64 = 0;
-    for &byte in data {
-        value = (value << 8) | (byte as u64);
-    }
-    Some(value as f64)
-}
 
 #[cfg(test)]
 mod tests {
@@ -98,29 +127,35 @@ mod tests {
 
     #[test]
     fn decode_two_sample_frames() -> Result<()> {
-        // test with the BMS's dbc file
+        // test with the CAN_DB file
         // to see print in tests:
         // cargo test -- --show-output
         let dbc = DbcHandler::new()?;
         println!("DBC loaded: {} message definitions available\n", dbc.dbc.messages().len());
 
+        let frame = Frame::new(
+            Id::Standard(embedded_can::StandardId::new(130).unwrap()), &[49, 231, 0, 0, 11, 223]).unwrap();
+
+        let (msg_name, signals) = dbc.decode(frame).unwrap();
+        println!("{}:", msg_name);
+        signals.iter().for_each(
+            |s| println!("  {}: {} {}", s.name, s.value, s.unit));
+
         let frame1 = Frame::new(
-            Id::Standard(embedded_can::StandardId::new(129).unwrap()), &[11, 223]).unwrap();
+            Id::Standard(embedded_can::StandardId::new(139).unwrap()), &[49, 231, 3, 4, 11, 223, 6]).unwrap();
+
+        let (msg_name, signals) = dbc.decode(frame1).unwrap();
+        println!("{}:", msg_name);
+        signals.iter().for_each(
+            |s| println!("  {}: {} {}", s.name, s.value, s.unit));
 
         let frame2 = Frame::new(
-            Id::Standard(embedded_can::StandardId::new(130).unwrap()), &[49, 231]).unwrap();
+            Id::Standard(embedded_can::StandardId::new(129).unwrap()), &[0]).unwrap();
 
-        let mut name;
-        let mut value;
-        let mut unit;
-
-        (name, value, unit) = dbc.decode(frame1);
-
-        println!("{}: {} {}", name, value, unit);
-
-        (name, value, unit) = dbc.decode(frame2);
-
-        println!("{}: {} {}", name, value, unit);
+        let (msg_name, signals) = dbc.decode(frame2).unwrap();
+        println!("{}:", msg_name);
+        signals.iter().for_each(
+            |s| println!("  {}: {} {}", s.name, s.value, s.unit));
 
         Ok(())
     }
