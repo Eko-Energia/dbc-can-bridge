@@ -38,15 +38,16 @@ impl DbcHandler {
     }
 
     pub fn decode(&'_ self, frame: Frame) -> Option<(&'_ String, Vec<SignalValue<'_>>)> {
+        if frame.data().is_empty() || frame.data().len() > 8 {
+            eprintln!("Error: Frame is either empty or data exceedes 8 bytes!");
+            return None;
+        }
+
         let idx = *self.message_index_by_id
             .get(&id_to_u32(&frame.id()))?;
 
         let message = self.dbc.messages()
             .get(idx)?;
-
-        if frame.data().is_empty() || frame.data().len() > 8 {
-            return None;
-        }
 
         let mut loading = false;
         let mut results: Vec<SignalValue> = Vec::new();
@@ -62,7 +63,7 @@ impl DbcHandler {
                 }
                 (false, _) => {
                     // a single byte value
-                    let result = (byte as f64) * signal.factor() - signal.offset();
+                    let result = (byte as f64) * signal.factor() + signal.offset();
                     // add to a vector
                     results.push(SignalValue {
                         name: signal.name(),
@@ -74,10 +75,10 @@ impl DbcHandler {
                     // decode collected value
                     loading = false;
                     value = (value << 8) | (byte as u64);
-                    let result = (value as f64) * signal.factor() - signal.offset();
+                    let result = (value as f64) * signal.factor() + signal.offset();
                     // add to a vector
                     results.push(SignalValue {
-                        name: &name[..name.len() - 2],
+                        name: &name[..name.len() - 2], // remove BH or BL label
                         value: result,
                         unit: signal.unit(),
                     });
