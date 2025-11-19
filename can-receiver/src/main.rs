@@ -26,7 +26,7 @@ fn main() -> Result<()> {
     // Initialize DBC decoding
     let dbc = DbcHandler::new()?;
 
-    println!("DBC loaded: {} message definitions available", dbc.dbc.messages().len());
+    println!("DBC loaded: {} message definitions available", dbc.dbc.messages.len());
 
     // CAN configuration
     let ws_config = ws::Usb2CanConfiguration::new(can_baud_rate)

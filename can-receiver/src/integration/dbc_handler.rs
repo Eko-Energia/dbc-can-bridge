@@ -25,10 +25,10 @@ impl DbcHandler {
         // println!("{:#?}", dbc);
 
         let map: HashMap<u32, usize> = dbc
-            .messages()
+            .messages
             .iter()
             .enumerate()
-            .map(|(i, msg)| (msg.id().raw(), i))
+            .map(|(i, msg)| (msg.id.raw(), i))
             .collect();
 
         // another debug
@@ -49,25 +49,25 @@ impl DbcHandler {
             .get(&id_to_u32(&frame.id()))
             .ok_or_else(|| eyre!("No message definition found for frame ID: {:?}", frame.id()))?;
 
-        let message = self.dbc.messages()
+        let message = self.dbc.messages
             .get(idx)
             .ok_or_else(|| eyre!("Message index {} out of bounds for frame ID: {:?}", idx, frame.id()))?;
 
         let mut results: Vec<SignalValue> = Vec::new();
 
-        for signal in message.signals() {
-            let value = decode_signal_value(signal.start_bit(), signal.size(), frame.data())?;
+        for signal in &message.signals {
+            let value = decode_signal_value(signal.start_bit, signal.size, frame.data())?;
             // decode collected value
-            let result = value * signal.factor() + signal.offset();
+            let result = value * signal.factor + signal.offset;
             // add to a vector
             results.push(SignalValue {
-                name: signal.name(),
+                name: &signal.name,
                 value: result,
-                unit: signal.unit(),
+                unit: &signal.unit,
             });
         }
 
-        Ok((message.name(), results))
+        Ok((&message.name, results))
     }
 }
 
@@ -95,7 +95,7 @@ fn id_to_u32(id: &Id) -> u32 {
     }
 }
 
-fn decode_signal_value(start_bit: &u64, size: &u64, data: &[u8]) -> Result<f64> {
+fn decode_signal_value(start_bit: u64, size: u64, data: &[u8]) -> Result<f64> {
     let start = (start_bit / 8) as usize;         // starting byte
     let end = start + (size / 8).max(1) as usize; // ending byte (exclusive in for)
     let mut value: u64 = 0;
@@ -122,7 +122,7 @@ mod tests {
         // to see print in tests:
         // cargo test -- --show-output
         let dbc = DbcHandler::new()?;
-        println!("DBC loaded: {} message definitions available\n", dbc.dbc.messages().len());
+        println!("DBC loaded: {} message definitions available\n", dbc.dbc.messages.len());
 
         let frame = Frame::new(
             Id::Standard(embedded_can::StandardId::new(130).unwrap()), &[49, 231, 0, 0, 11, 223]).unwrap();
