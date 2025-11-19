@@ -6,7 +6,7 @@ use can_dbc::{Dbc};
 
 #[derive(Debug)]
 pub struct SignalValue<'a> {
-    pub name: &'a str,
+    pub name: &'a String,
     pub value: f64,
     pub unit: &'a String,
 }
@@ -24,12 +24,15 @@ impl DbcHandler {
         // for debug purposes
         // println!("{:#?}", dbc);
 
-        let map = dbc
+        let map: HashMap<u32, usize> = dbc
             .messages()
             .iter()
             .enumerate()
             .map(|(i, msg)| (msg.id().raw(), i))
             .collect();
+
+        // another debug
+        // println!("{:#?}", dbc.messages()[map[&130]]);
 
         Ok(DbcHandler {
             dbc,
@@ -37,60 +40,34 @@ impl DbcHandler {
         })
     }
 
-    pub fn decode(&'_ self, frame: Frame) -> Option<(&'_ String, Vec<SignalValue<'_>>)> {
+    pub fn decode(&'_ self, frame: Frame) -> Result<(&'_ String, Vec<SignalValue<'_>>)> {
         if frame.data().is_empty() || frame.data().len() > 8 {
-            eprintln!("Error: Frame is either empty or data exceedes 8 bytes!");
-            return None;
+            return Err(eyre!("Error: Frame ID: {:?} is either empty or data exceedes 8 bytes!", frame.id()));
         }
 
         let idx = *self.message_index_by_id
-            .get(&id_to_u32(&frame.id()))?;
+            .get(&id_to_u32(&frame.id()))
+            .ok_or_else(|| eyre!("No message definition found for frame ID: {:?}", frame.id()))?;
 
         let message = self.dbc.messages()
-            .get(idx)?;
+            .get(idx)
+            .ok_or_else(|| eyre!("Message index {} out of bounds for frame ID: {:?}", idx, frame.id()))?;
 
-        let mut loading = false;
         let mut results: Vec<SignalValue> = Vec::new();
-        let mut value: u64 = 0;
 
-        for (i, signal) in message.signals().iter().enumerate() {
-            let byte = *frame.data().get(i)?;
-            
-            match (loading, signal.name()) {
-                (false, name) if name.ends_with('H') => {
-                    loading = true;
-                    value = byte as u64;
-                }
-                (false, _) => {
-                    // a single byte value
-                    let result = (byte as f64) * signal.factor() + signal.offset();
-                    // add to a vector
-                    results.push(SignalValue {
-                        name: signal.name(),
-                        value: result,
-                        unit: signal.unit(),
-                    });
-                }
-                (true, name) if name.ends_with('L') => {
-                    // decode collected value
-                    loading = false;
-                    value = (value << 8) | (byte as u64);
-                    let result = (value as f64) * signal.factor() + signal.offset();
-                    // add to a vector
-                    results.push(SignalValue {
-                        name: &name[..name.len() - 2], // remove BH or BL label
-                        value: result,
-                        unit: signal.unit(),
-                    });
-                }
-                (true, _) => {
-                    // load more bytes if in loading
-                    value = (value << 8) | (byte as u64);
-                }
-            }
+        for signal in message.signals() {
+            let value = decode_signal_value(signal.start_bit(), signal.size(), frame.data())?;
+            // decode collected value
+            let result = value * signal.factor() + signal.offset();
+            // add to a vector
+            results.push(SignalValue {
+                name: signal.name(),
+                value: result,
+                unit: signal.unit(),
+            });
         }
 
-        Some((message.name(), results))
+        Ok((message.name(), results))
     }
 }
 
@@ -118,6 +95,19 @@ fn id_to_u32(id: &Id) -> u32 {
     }
 }
 
+fn decode_signal_value(start_bit: &u64, size: &u64, data: &[u8]) -> Result<f64> {
+    let start = (start_bit / 8) as usize;         // starting byte
+    let end = start + (size / 8).max(1) as usize; // ending byte (exclusive in for)
+    let mut value: u64 = 0;
+
+    for i in start..end {
+        let byte = *data.get(i).ok_or_else(|| eyre!("Signal: Index {} out of bounds", i))?;
+        value = (value << 8) | (byte as u64);
+    }
+
+    Ok(value as f64)
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -137,7 +127,7 @@ mod tests {
         let frame = Frame::new(
             Id::Standard(embedded_can::StandardId::new(130).unwrap()), &[49, 231, 0, 0, 11, 223]).unwrap();
 
-        let (msg_name, signals) = dbc.decode(frame).unwrap();
+        let (msg_name, signals) = dbc.decode(frame)?;
         println!("{}:", msg_name);
         signals.iter().for_each(
             |s| println!("  {}: {} {}", s.name, s.value, s.unit));
@@ -145,15 +135,15 @@ mod tests {
         let frame1 = Frame::new(
             Id::Standard(embedded_can::StandardId::new(139).unwrap()), &[49, 231, 3, 4, 11, 223, 6]).unwrap();
 
-        let (msg_name, signals) = dbc.decode(frame1).unwrap();
+        let (msg_name, signals) = dbc.decode(frame1)?;
         println!("{}:", msg_name);
         signals.iter().for_each(
             |s| println!("  {}: {} {}", s.name, s.value, s.unit));
 
         let frame2 = Frame::new(
-            Id::Standard(embedded_can::StandardId::new(129).unwrap()), &[0]).unwrap();
+            Id::Standard(embedded_can::StandardId::new(128).unwrap()), &[0, 2, 1]).unwrap();
 
-        let (msg_name, signals) = dbc.decode(frame2).unwrap();
+        let (msg_name, signals) = dbc.decode(frame2)?;
         println!("{}:", msg_name);
         signals.iter().for_each(
             |s| println!("  {}: {} {}", s.name, s.value, s.unit));

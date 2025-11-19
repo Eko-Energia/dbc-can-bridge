@@ -1,6 +1,8 @@
 mod setup;
 mod integration;
 
+use std::time::Duration;
+
 use color_eyre::eyre::Result;
 use embedded_can::blocking::Can;
 use waveshare_usb_can_a::{self as ws};
@@ -33,8 +35,8 @@ fn main() -> Result<()> {
 
     // Initialize connection
     let mut device = ws::sync::new(&device_port, &ws_config)
-        // we won't use timeout as .receive() is blocking
-        // .set_serial_receive_timeout(Duration::from_millis(10000))
+        // not really infinite timeout
+        .set_serial_receive_timeout(Duration::from_secs(60 * 60 * 24 * 365 * 100))
         .open()?;
 
     println!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
@@ -42,13 +44,16 @@ fn main() -> Result<()> {
     loop {
         match device.receive() {
             Ok(frame) => {
-                if let Some((msg_name, signals)) = dbc.decode(frame) {
-                    println!("{}:", msg_name);
-                    signals.iter().for_each(
-                        |s| println!("  {}: {} {}", s.name, s.value, s.unit));
-                }
-                else {
-                    eprintln!("Error occured while decoding the frame!");
+                match dbc.decode(frame) {
+                    Ok((msg_name, signals)) => {
+                        println!("{}:", msg_name);
+                        signals.iter().for_each(
+                            |s| println!("  {}: {} {}", s.name, s.value, s.unit));                       
+                    }
+                    
+                    Err(e) => {
+                        eprintln!("Error decoding frame: {}", e);
+                    }
                 }
             }
             
