@@ -58,7 +58,8 @@ fn main() -> Result<()> {
             }
             
             Err(ws::sync::Error::SerialReadTimedOut) => {
-                println!("Timeout - no frame received, continuing...");
+                // i don't know why the specified timeout doesn't work...
+                // println!("Timeout - no frame received, continuing...");
                 continue;
             }
             

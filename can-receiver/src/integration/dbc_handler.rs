@@ -32,7 +32,7 @@ impl DbcHandler {
             .collect();
 
         // another debug
-        // println!("{:#?}", dbc.messages()[map[&130]]);
+        // println!("{:#?}", dbc.messages[map[&130]]);
 
         Ok(DbcHandler {
             dbc,
@@ -91,7 +91,7 @@ fn find_first_dbc_in_exe_dir() -> Result<PathBuf> {
 fn id_to_u32(id: &Id) -> u32 {
         match id {
         Id::Standard(sid) => sid.as_raw() as u32,
-        Id::Extended(eid) => eid.as_raw(),
+        Id::Extended(eid) => eid.as_raw() | 1 << 31,
     }
 }
 
