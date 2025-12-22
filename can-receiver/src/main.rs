@@ -36,7 +36,7 @@ fn main() -> Result<()> {
     // Initialize connection
     let mut device = ws::sync::new(&device_port, &ws_config)
         // not really infinite timeout
-        .set_serial_receive_timeout(Duration::from_secs(60 * 60 * 24 * 365 * 100))
+        .set_serial_receive_timeout(Duration::from_secs(60 * 60 * 24))
         .open()?;
 
     println!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
@@ -59,7 +59,7 @@ fn main() -> Result<()> {
             
             Err(ws::sync::Error::SerialReadTimedOut) => {
                 // i don't know why the specified timeout doesn't work...
-                // println!("Timeout - no frame received, continuing...");
+                println!("Timeout - no frame received, continuing...");
                 continue;
             }
             

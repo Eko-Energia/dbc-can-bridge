@@ -143,17 +143,6 @@ fn extract_signal_value(
     size: usize,
     byte_order: ByteOrder,
 ) -> Result<u64> {
-    if data.is_empty() || size == 0 {
-        return Err(eyre!("Data is empty or signal size is zero in extract_signal_value"));
-    }
-
-    let total_bits = data.len() * 8;
-    if start_bit + size > total_bits {
-        return Err(eyre!(
-            "Signal extraction out of bounds: start_bit {} + size {} exceeds total bits {}",
-            start_bit, size, total_bits));
-    }
-
     let mut result = 0u64;
 
     match byte_order {
