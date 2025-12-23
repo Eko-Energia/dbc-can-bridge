@@ -106,6 +106,14 @@ fn decode_signal_value(
     value_type: ValueType,
     data: &[u8]
 )-> Result<f64> {
+    // Guard rails: avoid shift/underflow for size==0 and shift-out-of-range for size>64
+    if size == 0 {
+        return Err(eyre!("Invalid signal size: 0"));
+    }
+    if size > 64 {
+        return Err(eyre!("Invalid signal size: {} (max 64)", size));
+    }
+
     // Extract raw value based on byte order and signal properties
     let raw_value = extract_signal_value(
         data,
@@ -117,14 +125,19 @@ fn decode_signal_value(
     // Convert to signed if needed
     let raw_value = if value_type == ValueType::Signed {
         // Convert to signed based on signal size
-        let max_unsigned = (1u64 << size) - 1;
-        let sign_bit = 1u64 << (size - 1);
-
-        if raw_value & sign_bit != 0 {
-            // Negative number - extend sign
-            (raw_value | (!max_unsigned)) as i64 as f64
+        if size == 64 {
+            // Full 64-bit two's complement: bit pattern cast is enough
+            (raw_value as i64) as f64
         } else {
-            raw_value as f64
+            let max_unsigned = (1u64 << size) - 1;
+            let sign_bit = 1u64 << (size - 1);
+
+            if raw_value & sign_bit != 0 {
+                // Negative number - extend sign
+                (raw_value | (!max_unsigned)) as i64 as f64
+            } else {
+                raw_value as f64
+            }
         }
     } else {
         raw_value as f64
@@ -165,26 +178,51 @@ fn extract_signal_value(
                 current_byte += 1;
                 bit_offset = 0;
             }
-        }
-        ByteOrder::BigEndian => {
-            // Big-endian (Motorola) bit extraction: iterate bits from
-            // start_bit toward higher bit positions, collecting each bit
-            // and appending into the result MSB-first.
-            let mut bit_pos = start_bit;
 
-            for _ in 0..size {
-                let byte_idx = bit_pos / 8;
-                let bit_idx = 7 - (bit_pos % 8);
-
-                if byte_idx >= data.len() {
-                    break;
-                }
-
-                let bit_val = (data[byte_idx] >> bit_idx) & 1;
-                result = (result << 1) | (bit_val as u64);
-
-                bit_pos += 1;
+            if remaining_bits > 0 {
+                return Err(eyre!(
+                    "Not enough data to decode little-endian signal: start_bit={}, size_bits={}, data_len_bytes={}",
+                    start_bit, size, data.len()
+                ));
             }
+        }
+        
+        ByteOrder::BigEndian => {
+            // Motorola (@0) without bit-by-bit:
+            // Take enough bytes, build a big-endian u64 window, then shift+mask.
+            //
+            // start_bit is the MSB position of the signal, where bit index inside a byte is LSB0
+            // i believe that in most DBCs Big endian uses LSB0.
+            // (0 = LSB/rightmost, 7 = MSB/leftmost).
+            // https://github.com/ebroecker/canmatrix/wiki/signal-Byteorder
+
+            let start_byte = start_bit / 8;
+            let start_bit_in_byte = start_bit % 8;
+
+            // How many bits do we span from the MSB position downwards?
+            // If start_bit_in_byte == 7, we're on MSB and span_bits == size.
+            let span_bits = (7 - start_bit_in_byte) + size;
+            let byte_count = span_bits.div_ceil(8);
+
+            if start_byte + byte_count > data.len() {
+                return Err(eyre!(
+                    "Not enough data to decode big-endian signal: start_bit={}, size_bits={}, data_len_bytes={}",
+                    start_bit, size, data.len()
+                ));
+            }
+
+            // Build window as big-endian bytes: [b0][b1]...[bn]
+            let mut acc = 0u64;
+            for i in 0..byte_count {
+                acc = (acc << 8) | data[start_byte + i] as u64;
+            }
+
+            let total_bits = byte_count * 8;
+            // Position the signal LSB at bit 0.
+            let shift = total_bits - (7 - start_bit_in_byte) - size;
+
+            let mask = if size == 64 { u64::MAX } else { (1u64 << size) - 1 };
+            result = (acc >> shift) & mask;
         }
     }
 
@@ -208,7 +246,7 @@ mod tests {
         println!("DBC loaded: {} message definitions available\n", dbc.dbc.messages.len());
 
         let frame = Frame::new(
-            Id::Standard(embedded_can::StandardId::new(130).unwrap()), &[49, 231, 0, 0, 11, 223]).unwrap();
+            Id::Standard(embedded_can::StandardId::new(130).unwrap()), &[231, 49, 0, 0, 223, 11]).unwrap();
 
         let (msg_name, signals) = dbc.decode(frame)?;
         println!("{}:", msg_name);
@@ -216,7 +254,7 @@ mod tests {
             |s| println!("  {}: {} {}", s.name, s.value, s.unit));
 
         let frame1 = Frame::new(
-            Id::Standard(embedded_can::StandardId::new(139).unwrap()), &[49, 231, 3, 4, 11, 223, 6]).unwrap();
+            Id::Standard(embedded_can::StandardId::new(139).unwrap()), &[231, 49, 4, 3, 223, 11, 6]).unwrap();
 
         let (msg_name, signals) = dbc.decode(frame1)?;
         println!("{}:", msg_name);
