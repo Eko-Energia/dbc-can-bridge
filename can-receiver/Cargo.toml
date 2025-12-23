@@ -9,6 +9,7 @@ license = "MIT"
 can-dbc = "8.0.0"
 color-eyre = "0.6.5"
 embedded-can = "0.4.1"
+jiff = "0.2.16"
 waveshare_usb_can_a = { package = "waveshare-usb-can-a", git = "https://github.com/im-0/rust-waveshare-usb-can-a", features = ["sync"] }
 
 [profile.dev.package."*"]
