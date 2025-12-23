@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use color_eyre::eyre::Result;
-use jiff::Timestamp;
+use time::OffsetDateTime;
 use embedded_can::blocking::Can;
 use waveshare_usb_can_a::sync::Usb2Can;
 use waveshare_usb_can_a::{self as ws};
@@ -20,7 +20,7 @@ pub struct App<'a> {
 
 pub struct MapEntry<'a> {
     pub signals: Vec<SignalValue<'a>>,
-    pub timestamp: Timestamp,
+    pub timestamp: OffsetDateTime,
 }
 
 impl<'a> App<'a> {
@@ -28,14 +28,14 @@ impl<'a> App<'a> {
         // Initialize DBC decoding
         let dbc_handler = DbcHandler::new()?;
 
-        println!("DBC loaded: {} message definitions available", dbc_handler.dbc.messages.len());
+        info!("DBC loaded: {} message definitions available", dbc_handler.dbc.messages.len());
         
         // Get settings from configuration
         let device_port = config::get_device_port()?;
         let can_baud_rate = config::get_can_baud_rate()?;
         
-        println!("Using device: {}", device_port);
-        println!("CAN speed: {:?}", can_baud_rate);
+        info!("Using device: {}", device_port);
+        info!("CAN speed: {:?}", can_baud_rate);
 
         // CAN configuration
         let ws_config = ws::Usb2CanConfiguration::new(can_baud_rate)
@@ -55,7 +55,7 @@ impl<'a> App<'a> {
     }
 
     pub fn run(&'a mut self) -> Result<()> {
-        println!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
+        info!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
         loop {
             match self.device.receive() {
                 Ok(frame) => {
@@ -69,23 +69,23 @@ impl<'a> App<'a> {
                             // push decoded frame into a map
                             self.data_map.insert(
                                 msg_name,
-                                MapEntry { signals, timestamp: Timestamp::now() }
+                                MapEntry { signals, timestamp: OffsetDateTime::now_local()? }
                             );
                         }
                         
                         Err(e) => {
-                            eprintln!("Error decoding frame: {}", e);
+                            error!("Error decoding frame: {}", e);
                         }
                     }
                 }
                 
                 Err(ws::sync::Error::SerialReadTimedOut) => {
-                    println!("Timeout - no frame received, continuing...");
+                    warn!("Timeout - no frame received, continuing...");
                     continue;
                 }
                 
                 Err(e) => {
-                    eprintln!("Error receiving frame: {}", e);
+                    error!("Error receiving frame: {}", e);
                 }
             }
         }
