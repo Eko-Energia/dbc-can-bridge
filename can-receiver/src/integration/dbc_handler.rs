@@ -42,7 +42,7 @@ impl DbcHandler {
 
     pub fn decode(&'_ self, frame: Frame) -> Result<(&'_ String, Vec<SignalValue<'_>>)> {
         if frame.data().is_empty() || frame.data().len() > 8 {
-            return Err(eyre!("Error: Frame ID: {:?} is either empty or data exceedes 8 bytes!", frame.id()));
+            return Err(eyre!("Error: Frame ID: {:?} is either empty or data exceeds 8 bytes!", frame.id()));
         }
 
         let idx = *self.message_index_by_id
@@ -343,7 +343,7 @@ BO_ 100 TestMessage: 8 Vector__XXX
 
         let result = handler.decode(frame);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("is either empty or data exceedes 8 bytes"));
+        assert!(result.unwrap_err().to_string().contains("is either empty or data exceeds 8 bytes"));
     }
 
     #[test]
