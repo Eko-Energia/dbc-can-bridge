@@ -14,23 +14,25 @@ fi
 
 # Start simulator in background and capture PTY path
 echo "Starting simulator..."
-source venv/bin/activate
+source .venv/bin/activate
 python symulator_serial.py > /tmp/simulator.log 2>&1 &
 SIM_PID=$!
 
 # Wait for simulator to start and create PTY
 sleep 2
 
-# Extract PTY path from log
-PTY_PATH=$(grep "Virtual serial port created:" /tmp/simulator.log | awk '{print $5}')
+# The simulator exposes a stable device path via symlink.
+PTY_PATH="/tmp/perla-bus-tty"
 
-if [ -z "$PTY_PATH" ]; then
-    echo "Error: Could not start simulator or detect PTY"
+if [ ! -L "$PTY_PATH" ]; then
+    echo "Error: Simulator did not create stable PTY symlink: $PTY_PATH"
+    echo "--- simulator log ---"
+    tail -n 50 /tmp/simulator.log
     kill $SIM_PID 2>/dev/null
     exit 1
 fi
 
-echo "Simulator started on: $PTY_PATH"
+echo "Simulator started on (stable): $PTY_PATH"
 echo ""
 
 # Update can-receiver config

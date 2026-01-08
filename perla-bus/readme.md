@@ -12,10 +12,10 @@ Symulator szyny CAN wysyłający losowe ramki zgodne z definicjami z pliku DBC.
 
 ```bash
 # Utwórz środowisko wirtualne Python
-python3 -m venv venv
+python3 -m venv .venv
 
 # Aktywuj środowisko
-source venv/bin/activate
+source .venv/bin/activate
 
 # Zainstaluj zależności
 pip install -r requirements.txt
@@ -23,7 +23,7 @@ pip install -r requirements.txt
 
 **Uwaga:** Pamiętaj aby zawsze aktywować środowisko przed uruchomieniem symulatorów:
 ```bash
-source venv/bin/activate
+source .venv/bin/activate
 ```
 
 ### 2. Konfiguracja wirtualnego interfejsu CAN (Linux)
@@ -98,7 +98,7 @@ LOG_SIGNALS = True
 #### Szybkie uruchomienie
 
 ```bash
-# Użyj skryptu pomocniczego (automatycznie aktywuje venv)
+# Użyj skryptu pomocniczego (automatycznie aktywuje .venv)
 ./run_simulator.sh
 
 # Lub z konfiguracją
@@ -109,7 +109,7 @@ LOG_SIGNALS = True
 
 ```bash
 # Aktywuj środowisko wirtualne
-source venv/bin/activate
+source .venv/bin/activate
 
 # Utworzy wirtualny port szeregowy (np. /dev/pts/4)
 python symulator_serial.py
@@ -118,17 +118,18 @@ python symulator_serial.py
 python symulator_serial.py --config simulator_config.py
 ```
 
-Po uruchomieniu symulator wyświetli ścieżkę do wirtualnego portu, np.:
+Po uruchomieniu symulator wyświetli ścieżkę do wirtualnego portu oraz stałą ścieżkę (symlink), np.:
 ```
 ✓ Virtual serial port created: /dev/pts/4
-  Use this port in can-receiver config: device_port=/dev/pts/4
+✓ Stable device path: /tmp/perla-bus-tty
+  Use this port in can-receiver config: device_port=/tmp/perla-bus-tty
 ```
 
 #### Konfiguracja can-receiver
 
-Skopiuj ścieżkę wirtualnego portu i edytuj `can-receiver/config.txt`:
+Edytuj `can-receiver/config.txt` i ustaw stałą ścieżkę:
 ```
-device_port=/dev/pts/4
+device_port=/tmp/perla-bus-tty
 can_baud_rate=500k
 ```
 
@@ -175,11 +176,14 @@ python symulator_serial.py --help
 
 Symulator implementuje protokół Waveshare USB-CAN-A:
 ```
-[0xAA] [ID3] [ID2] [ID1] [ID0] [DLC] [D0] ... [D7] [Checksum]
+[0xAA] [0x55] [0x01] [ID_TYPE] [FRAME_TYPE] [ID0] [ID1] [ID2] [ID3] [DLC] [D0] ... [D7] [0x00] [Checksum]
 ```
-- Standard ID (11-bit): przechowywany w niższych 11 bitach
-- Extended ID (29-bit): używa wszystkich 4 bajtów
-- Checksum: suma wszystkich bajtów & 0xFF
+- `ID_TYPE`: `0x01` = standard (11-bit), `0x02` = extended (29-bit)
+- `FRAME_TYPE`: `0x01` = data frame
+- `ID0..ID3`: CAN ID jako `u32` little-endian (dla standard ID używane niższe 11 bitów)
+- `D0..D7`: dane (z paddingiem `0x00` do 8 bajtów)
+- Byte `0x00` przed checksum to pole zarezerwowane
+- `Checksum`: suma bajtów od `[0x01]` do pola zarezerwowanego (włącznie) modulo 256
 
 ##`
 

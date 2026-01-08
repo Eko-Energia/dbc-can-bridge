@@ -1,8 +1,0 @@
-# CAN Receiver Configuration
-# Path to CAN device
-# For physical device: /dev/ttyUSB0
-# For simulator: /dev/pts/X (get from simulator output)
-device_port=/dev/ttyUSB0
-
-# CAN transmission speed (5k, 10k, 20k, 50k, 100k, 125k, 200k, 250k, 400k, 500k, 800k, 1000k)
-can_baud_rate=500k

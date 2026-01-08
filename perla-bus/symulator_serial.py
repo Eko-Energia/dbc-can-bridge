@@ -16,58 +16,80 @@ import pty
 import select
 import logging
 import importlib.util
+import termios
+import tty
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 
+FIXED_PTY_SYMLINK_PATH = "/tmp/perla-bus-tty"
+
+
 class WaveshareProtocol:
-    """Implements Waveshare USB-CAN-A protocol"""
-    
-    # Frame types
-    FRAME_TYPE_DATA = 0xAA
-    FRAME_TYPE_ACK = 0x55
+    """Implements Waveshare USB-CAN-A protocol (Fixed format)."""
+
+    # Fixed protocol constants
+    PROTO_FIXED_HEADER_0 = 0xAA
+    PROTO_FIXED_HEADER_1 = 0x55
+    PROTO_FIXED_TYPE_FRAME_FLAG = 0x01
+    PROTO_FIXED_ID_STANDARD = 0x01
+    PROTO_FIXED_ID_EXTENDED = 0x02
+    PROTO_FIXED_FRAME_DATA = 0x01
+    PROTO_FIXED_FRAME_REMOTE = 0x02
     
     @staticmethod
     def encode_can_frame(frame_id: int, data: bytes, is_extended: bool = False) -> bytes:
         """
-        Encode CAN frame in Waveshare USB-CAN-A format
-        
-        Format:
-        [0xAA] [ID3] [ID2] [ID1] [ID0] [DLC] [D0] ... [D7] [Checksum]
-        
-        For standard ID (11-bit): ID is stored in ID0 and ID1 (lower 11 bits)
-        For extended ID (29-bit): ID uses all 4 bytes
+        Encode CAN frame in Waveshare USB-CAN-A Fixed format.
+
+        Fixed frame (20 bytes):
+        [0]  0xAA
+        [1]  0x55
+        [2]  0x01                  (frame flag)
+        [3]  0x01 / 0x02           (standard / extended ID)
+        [4]  0x01 / 0x02           (data / remote)
+        [5:9]  CAN ID (u32 LE)
+        [9]  DLC (0..8)
+        [10:18] Data (8 bytes, padded with 0x00)
+        [18] Reserved (0x00)
+        [19] Checksum (u8 sum of bytes [2..18])
         """
-        packet = bytearray()
-        packet.append(WaveshareProtocol.FRAME_TYPE_DATA)
-        
-        # Encode ID (4 bytes, little-endian)
-        # For extended frame, set bit 31
-        if is_extended:
-            frame_id |= (1 << 31)
-        
-        packet.extend(frame_id.to_bytes(4, byteorder='little'))
-        
-        # DLC (Data Length Code)
         dlc = len(data)
-        packet.append(dlc)
-        
-        # Data bytes (pad to 8 bytes)
-        packet.extend(data)
-        packet.extend([0] * (8 - len(data)))
-        
-        # Calculate checksum (sum of all bytes)
-        checksum = sum(packet) & 0xFF
-        packet.append(checksum)
-        
+        if dlc > 8:
+            raise ValueError(f"CAN DLC too large: {dlc} (max 8)")
+
+        packet = bytearray(20)
+        packet[0] = WaveshareProtocol.PROTO_FIXED_HEADER_0
+        packet[1] = WaveshareProtocol.PROTO_FIXED_HEADER_1
+        packet[2] = WaveshareProtocol.PROTO_FIXED_TYPE_FRAME_FLAG
+        packet[3] = (
+            WaveshareProtocol.PROTO_FIXED_ID_EXTENDED
+            if is_extended
+            else WaveshareProtocol.PROTO_FIXED_ID_STANDARD
+        )
+        packet[4] = WaveshareProtocol.PROTO_FIXED_FRAME_DATA
+
+        if is_extended:
+            frame_id &= 0x1FFFFFFF
+        else:
+            frame_id &= 0x7FF
+
+        packet[5:9] = int(frame_id).to_bytes(4, byteorder='little', signed=False)
+        packet[9] = dlc
+        packet[10 : 10 + dlc] = data
+        packet[18] = 0x00
+
+        checksum = 0
+        for b in packet[2:19]:
+            checksum = (checksum + b) & 0xFF
+        packet[19] = checksum
+
         return bytes(packet)
     
     @staticmethod
     def create_ack() -> bytes:
-        """Create ACK response"""
-        return bytes([WaveshareProtocol.FRAME_TYPE_ACK])
-
-
+        """Create ACK response (not implemented)."""
+        return bytes([])
 class SimulatorConfig:
     """Configuration for simulator"""
     
@@ -82,8 +104,8 @@ class SimulatorConfig:
         self.cycle_variation = 10
         self.realistic_mode = False
         self.smoothing_factor = 0.8
-        self.log_level = "info"
-        self.log_frames = True
+        self.log_level = "warning"
+        self.log_frames = False
         self.log_signals = True
         
         if config_file and Path(config_file).exists():
@@ -143,18 +165,26 @@ class SerialCANSimulator:
         self.slave_fd = None
         self.serial_port = serial_port
         self.pty_path = None
+        self.device_port_path = None
         
         if serial_port is None:
             # Create virtual serial port (PTY)
             self.master_fd, self.slave_fd = pty.openpty()
             self.pty_path = os.ttyname(self.slave_fd)
+            
+            # Configure PTY for raw binary mode (crucial for CAN frames)
+            self._configure_pty_raw_mode()
+            
             print(f"\n✓ Virtual serial port created: {self.pty_path}")
-            print(f"  Use this port in can-receiver config: device_port={self.pty_path}\n")
+            self.device_port_path = self._create_fixed_pty_symlink(self.pty_path)
+            print(f"✓ Stable device path: {self.device_port_path}")
+            print(f"  Use this port in can-receiver config: device_port={self.device_port_path}\n")
         else:
             # Use existing serial port
             import serial
             self.serial = serial.Serial(serial_port, baudrate=115200, timeout=1)
             logging.info(f"Connected to serial port: {serial_port}")
+            self.device_port_path = serial_port
         
         # Store message cycle times (in seconds)
         self.message_cycles = self._get_message_cycles()
@@ -179,6 +209,37 @@ class SerialCANSimulator:
             handlers=[logging.StreamHandler()],
             force=True
         )
+
+    def _configure_pty_raw_mode(self):
+        """Configure PTY for raw binary mode (no processing of control characters)."""
+        try:
+            # Set slave side to raw mode - essential for binary CAN frames
+            tty.setraw(self.slave_fd)
+            
+            # Additionally configure for non-blocking and no echo
+            attrs = termios.tcgetattr(self.slave_fd)
+            # Disable all input/output processing
+            attrs[0] = 0  # iflag - no input processing
+            attrs[1] = 0  # oflag - no output processing
+            attrs[3] = 0  # lflag - no local modes
+            termios.tcsetattr(self.slave_fd, termios.TCSANOW, attrs)
+            
+            logging.debug("PTY configured for raw binary mode")
+        except Exception as e:
+            logging.warning(f"Could not configure PTY raw mode: {e}")
+    
+    def _create_fixed_pty_symlink(self, slave_path: str) -> str:
+        """Create/refresh a stable symlink pointing at the PTY slave path."""
+        link_path = FIXED_PTY_SYMLINK_PATH
+
+        if os.path.lexists(link_path):
+            if os.path.islink(link_path):
+                os.unlink(link_path)
+            else:
+                raise RuntimeError(f"Refusing to replace existing non-symlink path: {link_path}")
+
+        os.symlink(slave_path, link_path)
+        return link_path
         
     def _get_message_cycles(self) -> Dict[int, float]:
         """Extract message cycle times from DBC attributes"""
@@ -249,15 +310,21 @@ class SerialCANSimulator:
         try:
             if self.master_fd is not None:
                 # Write to PTY
-                os.write(self.master_fd, packet)
+                total = 0
+                while total < len(packet):
+                    written = os.write(self.master_fd, packet[total:])
+                    if written <= 0:
+                        raise OSError("PTY write returned 0 bytes")
+                    total += written
             else:
                 # Write to real serial port
                 self.serial.write(packet)
                 
-            # Log sent frame
-            data_hex = ' '.join(f'{b:02X}' for b in data)
-            print(f"TX: ID=0x{frame_id:03X} DLC={len(data)} Data=[{data_hex}]")
-            
+            # Log sent frame with packet bytes for debugging
+            if self.config.log_frames:
+                packet_hex = ' '.join(f'{b:02X}' for b in packet)
+                print(f"TX: {packet_hex}")
+                
         except Exception as e:
             print(f"Error sending frame: {e}")
     
@@ -281,7 +348,7 @@ class SerialCANSimulator:
             
             if self.config.log_signals:
                 signal_str = ", ".join([f"{k}={v:.2f}" for k, v in data.items()])
-                logging.info(f"{message.name}: {signal_str}")
+                print(f"{message.name}: {signal_str}")
             
         except Exception as e:
             logging.error(f"Error encoding message {message.name}: {e}")
@@ -330,13 +397,18 @@ class SerialCANSimulator:
         """
         print("\n" + "="*70)
         print("Starting continuous CAN simulation on serial port")
-        if self.pty_path:
-            print(f"Virtual device: {self.pty_path}")
+        if self.device_port_path:
+            if self.pty_path:
+                print(f"Virtual device: {self.pty_path}")
+            print(f"Device port: {self.device_port_path}")
             print("\nTo use with can-receiver:")
-            print(f"  1. Edit config.txt and set: device_port={self.pty_path}")
+            print(f"  1. Edit config.txt and set: device_port={self.device_port_path}")
             print(f"  2. Run: cargo run")
         print("="*70)
         print("\nPress Ctrl+C to stop\n")
+        
+        # Small delay to let receiver open the port and initialize
+        time.sleep(0.5)
         
         start_time = time.time()
         frame_count = 0
@@ -348,9 +420,6 @@ class SerialCANSimulator:
                 # Check if duration limit reached
                 if duration and (current_time - start_time) >= duration:
                     break
-                
-                # Check for incoming commands
-                self.check_for_commands()
                 
                 # Send messages that are due
                 for message in self.db.messages:
@@ -425,9 +494,9 @@ Examples:
   python symulator_serial.py --realistic
 
 Integration with can-receiver:
-  1. Run this simulator - it will create a PTY (e.g., /dev/pts/4)
+  1. Run this simulator - it will create a PTY and expose a stable path (default: /tmp/perla-bus-tty)
   2. Edit can-receiver/config.txt:
-       device_port=/dev/pts/4
+      device_port=/tmp/perla-bus-tty
   3. Run can-receiver:
        cd can-receiver && cargo run
         """
@@ -435,6 +504,7 @@ Integration with can-receiver:
     
     parser.add_argument(
         '--config',
+        default='simulator_config.py',
         help='Path to configuration file'
     )
     
