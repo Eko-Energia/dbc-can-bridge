@@ -1,5 +1,5 @@
 use color_eyre::eyre::{Result, eyre};
-use std::{collections::HashMap, ffi::OsStr, fs, path::PathBuf};
+use std::{cmp::min, collections::HashMap, ffi::OsStr, fs, path::PathBuf};
 use embedded_can::{Frame as FrameTrait, Id};
 use waveshare_usb_can_a::Frame;
 use can_dbc::{Dbc, ByteOrder, ValueType};
@@ -168,7 +168,7 @@ fn extract_signal_value(
             let mut bit_offset = start_bit_in_byte;
 
             while remaining_bits > 0 && current_byte < data.len() {
-                let bits_in_this_byte = std::cmp::min(remaining_bits, 8 - bit_offset);
+                let bits_in_this_byte = min(remaining_bits, 8 - bit_offset);
                 let mask = ((1u64 << bits_in_this_byte) - 1) << bit_offset;
                 let byte_value = ((data[current_byte] as u64) & mask) >> bit_offset;
 
