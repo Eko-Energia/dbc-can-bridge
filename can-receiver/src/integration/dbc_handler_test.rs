@@ -461,3 +461,248 @@ BO_ 100 TestMessage: 8 Vector__XXX
     assert_eq!(signals[0].unit, "°C");
     assert_eq!(signals[0].value, 0.0); // 400 * 0.1 - 40 = 0
 }
+
+#[test]
+fn test_decode_big_endian_signal() {
+    // Test with big-endian (Motorola) byte order using @0
+    let dbc_content = r#"
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BO_ 100 TestMessage: 8 Vector__XXX
+ SG_ BigEndianSignal : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+"#;
+    let dbc = Dbc::try_from(dbc_content).unwrap();
+    let map: HashMap<u32, usize> = dbc
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| (msg.id.raw(), i))
+        .collect();
+    
+    let handler = DbcHandler {
+        dbc,
+        message_index_by_id: map
+    };
+
+    // Create a frame with data
+    let frame = Frame::new(
+        Id::Standard(embedded_can::StandardId::new(100).unwrap()), 
+        &[0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    ).unwrap();
+
+    let result = handler.decode(frame);
+    assert!(result.is_ok());
+    let (msg_name, signals) = result.unwrap();
+    assert_eq!(msg_name, "TestMessage");
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].name, "BigEndianSignal");
+    assert_eq!(signals[0].value, 66.0); // 0x42 = 66
+}
+
+#[test]
+fn test_decode_big_endian_16bit_signal() {
+    // Test with 16-bit big-endian signal
+    let dbc_content = r#"
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BO_ 100 TestMessage: 8 Vector__XXX
+ SG_ BigEndian16 : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
+"#;
+    let dbc = Dbc::try_from(dbc_content).unwrap();
+    let map: HashMap<u32, usize> = dbc
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| (msg.id.raw(), i))
+        .collect();
+    
+    let handler = DbcHandler {
+        dbc,
+        message_index_by_id: map
+    };
+
+    // Create a frame with 16-bit value 0x1234 in big-endian
+    let frame = Frame::new(
+        Id::Standard(embedded_can::StandardId::new(100).unwrap()), 
+        &[0x12, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    ).unwrap();
+
+    let result = handler.decode(frame);
+    assert!(result.is_ok());
+    let (_, signals) = result.unwrap();
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].value, 0x1234 as f64); // 4660 in decimal
+}
+
+#[test]
+fn test_decode_big_endian_signal_with_factor() {
+    // Test big-endian signal with factor and offset
+    let dbc_content = r#"
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BO_ 100 TestMessage: 8 Vector__XXX
+ SG_ Speed : 7|16@0+ (0.01,0) [0|655.35] "km/h" Vector__XXX
+"#;
+    let dbc = Dbc::try_from(dbc_content).unwrap();
+    let map: HashMap<u32, usize> = dbc
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| (msg.id.raw(), i))
+        .collect();
+    
+    let handler = DbcHandler {
+        dbc,
+        message_index_by_id: map
+    };
+
+    // Raw value 10000 -> 10000 * 0.01 = 100.0 km/h
+    // 10000 = 0x2710 in big-endian: 0x27, 0x10
+    let frame = Frame::new(
+        Id::Standard(embedded_can::StandardId::new(100).unwrap()), 
+        &[0x27, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    ).unwrap();
+
+    let result = handler.decode(frame);
+    assert!(result.is_ok());
+    let (_, signals) = result.unwrap();
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].name, "Speed");
+    assert_eq!(signals[0].unit, "km/h");
+    assert_eq!(signals[0].value, 100.0);
+}
+
+#[test]
+fn test_decode_mixed_endianness_signals() {
+    // Test message with both little-endian and big-endian signals
+    let dbc_content = r#"
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BO_ 100 TestMessage: 8 Vector__XXX
+ SG_ LittleEndianSignal : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ BigEndianSignal : 15|8@0+ (1,0) [0|255] "" Vector__XXX
+"#;
+    let dbc = Dbc::try_from(dbc_content).unwrap();
+    let map: HashMap<u32, usize> = dbc
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| (msg.id.raw(), i))
+        .collect();
+    
+    let handler = DbcHandler {
+        dbc,
+        message_index_by_id: map
+    };
+
+    // Byte 0: 0xAA (little-endian signal)
+    // Byte 1: 0xBB (big-endian signal)
+    let frame = Frame::new(
+        Id::Standard(embedded_can::StandardId::new(100).unwrap()), 
+        &[0xAA, 0xBB, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    ).unwrap();
+
+    let result = handler.decode(frame);
+    assert!(result.is_ok());
+    let (msg_name, signals) = result.unwrap();
+    assert_eq!(msg_name, "TestMessage");
+    assert_eq!(signals.len(), 2);
+    assert_eq!(signals[0].name, "LittleEndianSignal");
+    assert_eq!(signals[0].value, 0xAA as f64); // 170
+    assert_eq!(signals[1].name, "BigEndianSignal");
+    assert_eq!(signals[1].value, 0xBB as f64); // 187
+}
+
+#[test]
+fn test_decode_big_endian_signed_signal() {
+    // Test big-endian signed signal using @0-
+    let dbc_content = r#"
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BO_ 100 TestMessage: 8 Vector__XXX
+ SG_ SignedBigEndian : 7|16@0- (1,0) [-32768|32767] "" Vector__XXX
+"#;
+    let dbc = Dbc::try_from(dbc_content).unwrap();
+    let map: HashMap<u32, usize> = dbc
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| (msg.id.raw(), i))
+        .collect();
+    
+    let handler = DbcHandler {
+        dbc,
+        message_index_by_id: map
+    };
+
+    // Test negative value: -1 in 16-bit two's complement = 0xFFFF
+    let frame = Frame::new(
+        Id::Standard(embedded_can::StandardId::new(100).unwrap()), 
+        &[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    ).unwrap();
+
+    let result = handler.decode(frame);
+    assert!(result.is_ok());
+    let (_, signals) = result.unwrap();
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].value, -1.0);
+}
+
+#[test]
+fn test_decode_big_endian_32bit_signal() {
+    // Test 32-bit big-endian signal
+    let dbc_content = r#"
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BO_ 100 TestMessage: 8 Vector__XXX
+ SG_ BigEndian32 : 7|32@0+ (1,0) [0|4294967295] "" Vector__XXX
+"#;
+    let dbc = Dbc::try_from(dbc_content).unwrap();
+    let map: HashMap<u32, usize> = dbc
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| (msg.id.raw(), i))
+        .collect();
+    
+    let handler = DbcHandler {
+        dbc,
+        message_index_by_id: map
+    };
+
+    // Create a frame with 32-bit value 0x12345678 in big-endian
+    let frame = Frame::new(
+        Id::Standard(embedded_can::StandardId::new(100).unwrap()), 
+        &[0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x00]
+    ).unwrap();
+
+    let result = handler.decode(frame);
+    assert!(result.is_ok());
+    let (_, signals) = result.unwrap();
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].value, 0x12345678 as f64); // 305419896 in decimal
+}
