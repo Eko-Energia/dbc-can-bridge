@@ -13,7 +13,7 @@ pub struct SignalValue<'a> {
 
 pub struct DbcHandler {
     pub dbc: Dbc,
-    message_index_by_id: HashMap<u32, usize>
+    pub(crate) message_index_by_id: HashMap<u32, usize>
 }
 
 impl DbcHandler {
@@ -42,7 +42,7 @@ impl DbcHandler {
 
     pub fn decode(&'_ self, frame: Frame) -> Result<(&'_ String, Vec<SignalValue<'_>>)> {
         if frame.data().is_empty() || frame.data().len() > 8 {
-            return Err(eyre!("Error: Frame ID: {:?} is either empty or data exceedes 8 bytes!", frame.id()));
+            return Err(eyre!("Error: Frame ID: {:?} is either empty or data exceeds 8 bytes!", frame.id()));
         }
 
         let idx = *self.message_index_by_id
@@ -89,7 +89,7 @@ fn find_first_dbc_in_exe_dir() -> Result<PathBuf> {
     Err(eyre!(format!("No .dbc file found in {:?}", exe_dir)))
 }
 
-fn id_to_u32(id: &Id) -> u32 {
+pub(crate) fn id_to_u32(id: &Id) -> u32 {
         match id {
         Id::Standard(sid) => sid.as_raw() as u32,
         Id::Extended(eid) => eid.as_raw() | 1 << 31,
@@ -99,7 +99,7 @@ fn id_to_u32(id: &Id) -> u32 {
 // inspired by: https://github.com/PurdueElectricRacing/can_decode/
 /// Decodes a single signal from raw CAN data.
 /// Extracts the raw bits for a signal, converts to signed/unsigned as needed
-fn decode_signal_value(
+pub(crate) fn decode_signal_value(
     start_bit: u64,
     size: u64,
     byte_order: ByteOrder,
@@ -150,7 +150,7 @@ fn decode_signal_value(
 /// Extracts raw signal bits from CAN data.
 /// Handles both little-endian and big-endian byte ordering according to
 /// the signal definition.
-fn extract_signal_value(
+pub(crate) fn extract_signal_value(
     data: &[u8],
     start_bit: usize,
     size: usize,
@@ -229,46 +229,6 @@ fn extract_signal_value(
     Ok(result)
 }
 
-
 #[cfg(test)]
-mod tests {
-    use crate::integration::dbc_handler::DbcHandler;
-    use color_eyre::Result;
-    use embedded_can::{Frame as FrameTrait, Id};
-    use waveshare_usb_can_a::Frame;
-
-    #[test]
-    fn decode_two_sample_frames() -> Result<()> {
-        // test with the CAN_DB file
-        // to see print in tests:
-        // cargo test -- --show-output
-        let dbc = DbcHandler::new()?;
-        println!("DBC loaded: {} message definitions available\n", dbc.dbc.messages.len());
-
-        let frame = Frame::new(
-            Id::Standard(embedded_can::StandardId::new(130).unwrap()), &[231, 49, 0, 0, 223, 11]).unwrap();
-
-        let (msg_name, signals) = dbc.decode(frame)?;
-        println!("{}:", msg_name);
-        signals.iter().for_each(
-            |s| println!("  {}: {} {}", s.name, s.value, s.unit));
-
-        let frame1 = Frame::new(
-            Id::Standard(embedded_can::StandardId::new(139).unwrap()), &[231, 49, 4, 3, 223, 11, 6]).unwrap();
-
-        let (msg_name, signals) = dbc.decode(frame1)?;
-        println!("{}:", msg_name);
-        signals.iter().for_each(
-            |s| println!("  {}: {} {}", s.name, s.value, s.unit));
-
-        let frame2 = Frame::new(
-            Id::Standard(embedded_can::StandardId::new(128).unwrap()), &[0, 2, 1]).unwrap();
-
-        let (msg_name, signals) = dbc.decode(frame2)?;
-        println!("{}:", msg_name);
-        signals.iter().for_each(
-            |s| println!("  {}: {} {}", s.name, s.value, s.unit));
-
-        Ok(())
-    }
-}
+#[path = "./dbc_handler_test.rs"]
+mod dbc_handler_test;
