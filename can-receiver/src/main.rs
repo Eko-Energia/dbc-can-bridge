@@ -1,71 +1,46 @@
 mod setup;
 mod integration;
+mod app;
 
-use std::time::Duration;
+use std::fs::File;
 
-use color_eyre::eyre::Result;
-use embedded_can::blocking::Can;
-use waveshare_usb_can_a::{self as ws};
+use color_eyre::eyre::{Result, eyre};
+use log::LevelFilter;
 use setup::config;
+use app::App;
+use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger};
 
-use crate::integration::dbc_handler::DbcHandler;
+extern crate simplelog;
+#[macro_use] extern crate log;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    // Initialize configuration
-    config::init_config()?;
-    
-    // Get settings from configuration
-    let device_port = config::get_device_port()?;
-    let can_baud_rate = config::get_can_baud_rate()?;
-    
-    println!("Using device: {}", device_port);
-    println!("CAN speed: {:?}", can_baud_rate);
+    let log_config = ConfigBuilder::new()
+        .set_time_offset_to_local()
+        .map_err(|_| eyre!("Failed to get local time offset"))?
+        .build();
 
-    // Initialize DBC decoding
-    let dbc = DbcHandler::new()?;
+    CombinedLogger::init(
+        vec![
+        TermLogger::new(LevelFilter::Trace, log_config.clone(), TerminalMode::Mixed, ColorChoice::Auto),
+        WriteLogger::new(LevelFilter::Trace, log_config, File::create("can-receiver.log")?),
+    ]
+    )?;
 
-    println!("DBC loaded: {} message definitions available", dbc.dbc.messages.len());
+    let result = (|| -> Result<_> {
+        // Initialize configuration
+        config::init_config()?;
+        // Run the app
+        App::new()?.run()
+    })();
 
-    // CAN configuration
-    let ws_config = ws::Usb2CanConfiguration::new(can_baud_rate)
-        .set_loopback(false)
-        .set_silent(false);  // Enable receiving frames from the bus
-
-    // Initialize connection
-    let mut device = ws::sync::new(&device_port, &ws_config)
-        // not really infinite timeout
-        .set_serial_receive_timeout(Duration::from_secs(60 * 60 * 24 * 365 * 100))
-        .open()?;
-
-    println!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
-
-    loop {
-        match device.receive() {
-            Ok(frame) => {
-                match dbc.decode(frame) {
-                    Ok((msg_name, signals)) => {
-                        println!("{}:", msg_name);
-                        signals.iter().for_each(
-                            |s| println!("  {}: {} {}", s.name, s.value, s.unit));                       
-                    }
-                    
-                    Err(e) => {
-                        eprintln!("Error decoding frame: {}", e);
-                    }
-                }
-            }
-            
-            Err(ws::sync::Error::SerialReadTimedOut) => {
-                // i don't know why the specified timeout doesn't work...
-                // println!("Timeout - no frame received, continuing...");
-                continue;
-            }
-            
-            Err(e) => {
-                eprintln!("Error receiving frame: {}", e);
-            }
+    match result {
+        Err(e) => {
+            error!("App error: {:?}", e);
+            // fix for double error messages
+            Ok(())
         }
+        Ok(s) => Ok(s)
     }
 }
