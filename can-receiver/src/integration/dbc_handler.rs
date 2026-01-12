@@ -4,7 +4,7 @@ use embedded_can::{Frame as FrameTrait, Id};
 use waveshare_usb_can_a::Frame;
 use can_dbc::{Dbc, ByteOrder, ValueType};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SignalValue<'a> {
     pub name: &'a String,
     pub value: f64,

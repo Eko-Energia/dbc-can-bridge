@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
 use color_eyre::eyre::Result;
@@ -8,22 +7,17 @@ use waveshare_usb_can_a::sync::Usb2Can;
 use waveshare_usb_can_a::{self as ws};
 use crate::setup::config;
 
-use crate::integration::dbc_handler::{DbcHandler, SignalValue};
+use crate::integration::dbc_handler::DbcHandler;
+use crate::websocket::{CanUpdate, SignalData};
+use tokio::sync::mpsc;
 
-// lifetime specifiers and borrows can possibly break actix web
-// if so I'll make copies instead
-pub struct App<'a> {
+pub struct App {
     dbc_handler: DbcHandler,
     device: Usb2Can,
-    pub data_map: HashMap<&'a String, MapEntry<'a>>
+    ws_tx: Option<mpsc::UnboundedSender<CanUpdate>>,
 }
 
-pub struct MapEntry<'a> {
-    pub signals: Vec<SignalValue<'a>>,
-    pub timestamp: OffsetDateTime,
-}
-
-impl<'a> App<'a> {
+impl App {
     pub fn new() -> Result<Self> {
         // Initialize DBC decoding
         let dbc_handler = DbcHandler::new()?;
@@ -51,26 +45,42 @@ impl<'a> App<'a> {
         Ok(Self {
             dbc_handler,
             device,
-            data_map: HashMap::new() })
+            ws_tx: None,
+        })
     }
 
-    pub fn run(&'a mut self) -> Result<()> {
+    /// Sets the sender for WebSocket updates
+    pub fn set_websocket_sender(&mut self, tx: mpsc::UnboundedSender<CanUpdate>) {
+        self.ws_tx = Some(tx);
+    }
+
+    pub fn run(&mut self) -> Result<()> {
         info!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
         loop {
             match self.device.receive() {
                 Ok(frame) => {
                     match self.dbc_handler.decode(frame) {
                         Ok((msg_name, signals)) => {
-                            // temporary print
-                            println!("{}:", msg_name);
-                            signals.iter().for_each(
-                                |s| println!("  {}: {} {}", s.name, s.value, s.unit));
-                            // end of temporary print
-                            // push decoded frame into a map
-                            self.data_map.insert(
-                                msg_name,
-                                MapEntry { signals, timestamp: OffsetDateTime::now_local()? }
-                            );
+                            let timestamp = OffsetDateTime::now_local()?;
+                            
+                            // Send update to WebSocket if connected
+                            if let Some(ref tx) = self.ws_tx {
+                                let update = CanUpdate {
+                                    message_name: msg_name.to_string(),
+                                    signals: signals
+                                        .iter()
+                                        .map(|s| SignalData {
+                                            name: s.name.to_string(),
+                                            value: s.value,
+                                            unit: s.unit.to_string(),
+                                        })
+                                        .collect(),
+                                    timestamp,
+                                };
+                                
+                                // Send without blocking - skip if channel is full
+                                let _ = tx.send(update);
+                            }
                         }
                         
                         Err(e) => {

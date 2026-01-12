@@ -13,6 +13,11 @@ log = "0.4.29"
 simplelog = "0.12.2"
 time = { version = "0.3.44", features = ["serde"] }
 waveshare_usb_can_a = { package = "waveshare-usb-can-a", git = "https://github.com/im-0/rust-waveshare-usb-can-a", features = ["sync"] }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+futures-util = "0.3"
 
 [profile.dev.package."*"]
 opt-level = 3
