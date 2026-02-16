@@ -3,8 +3,9 @@ mod integration;
 mod app;
 mod websocket;
 
-use std::fs::File;
+use std::fs::{File, create_dir_all};
 use std::net::SocketAddr;
+use time::{OffsetDateTime, format_description::parse};
 
 use color_eyre::eyre::{Result, eyre};
 use log::LevelFilter;
@@ -24,10 +25,15 @@ fn main() -> Result<()> {
         .map_err(|_| eyre!("Failed to get local time offset"))?
         .build();
 
+    create_dir_all("logs")?;
+    let fmt = parse("[year]-[month]-[day]_[hour]-[minute]-[second]")?;
+    let ts = OffsetDateTime::now_local()?.format(&fmt)?;
+    let log_filename = format!("logs/can-receiver-{}.log", ts);
+
     CombinedLogger::init(
         vec![
         TermLogger::new(LevelFilter::Debug, log_config.clone(), TerminalMode::Mixed, ColorChoice::Auto),
-        WriteLogger::new(LevelFilter::Debug, log_config, File::create("can-receiver.log")?),
+        WriteLogger::new(LevelFilter::Debug, log_config, File::create(log_filename)?),
     ]
     )?;
 

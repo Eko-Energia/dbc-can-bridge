@@ -15,4 +15,4 @@ fi
 
 # Run simulator
 echo "Starting serial CAN simulator..."
-python symulator_serial.py "$@"
+python simulator_serial.py "$@"

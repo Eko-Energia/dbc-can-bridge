@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, eyre};
 use time::OffsetDateTime;
 use embedded_can::blocking::Can;
 use waveshare_usb_can_a::sync::Usb2Can;
@@ -95,7 +95,7 @@ impl App {
                 }
                 
                 Err(e) => {
-                    error!("Error receiving frame: {}", e);
+                    return Err(eyre!("Error receiving frame: {}", e));
                 }
             }
         }
