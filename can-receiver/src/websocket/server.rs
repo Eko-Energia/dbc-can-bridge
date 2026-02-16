@@ -92,7 +92,7 @@ impl WebSocketServer {
                         };
 
                         if let Ok(json) = serde_json::to_string(&msg) {
-                            let _ = client.tx.send(Message::Text(json));
+                            let _ = client.tx.send(Message::Text(json.into()));
                         }
                     }
                 }
@@ -267,7 +267,7 @@ async fn send_snapshot(
     let snapshot = ServerMessage::Snapshot { data: filtered };
 
     if let Ok(json) = serde_json::to_string(&snapshot) {
-        let _ = tx.send(Message::Text(json));
+        let _ = tx.send(Message::Text(json.into()));
         info!("Sent snapshot with {} entries", entries.len());
     }
 }
