@@ -4,14 +4,17 @@ use std::{
     sync::{Mutex, OnceLock},
     io::Write,
 };
-use waveshare_usb_can_a::CanBaudRate;
 use color_eyre::eyre::{Result, eyre};
+
+#[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+use waveshare_usb_can_a::CanBaudRate;
 
 const CONFIG_FILE_NAME: &str = "config.txt";
 
 #[derive(Debug, Clone)]
 pub struct Config {
     pub device_port: String,
+    #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
     pub can_baud_rate: CanBaudRate,
 }
 
@@ -19,6 +22,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             device_port: get_default_device_port(),
+            #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
             can_baud_rate: CanBaudRate::R500kBd,
         }
     }
@@ -58,6 +62,7 @@ impl Config {
                     "device_port" => {
                         config.device_port = value.to_string();
                     }
+                    #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
                     "can_baud_rate" => {
                         config.can_baud_rate = parse_can_baud_rate(value)?;
                     }
@@ -73,6 +78,7 @@ impl Config {
 
     /// Saves configuration to file
     fn save_to_file(&self, path: &PathBuf) -> Result<()> {
+        #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
         let content = format!(
             "# CAN Receiver Configuration\n\
              # Path to CAN device\n\
@@ -82,6 +88,14 @@ impl Config {
              can_baud_rate={}\n",
             self.device_port,
             format_can_baud_rate(self.can_baud_rate)
+        );
+
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        let content = format!(
+            "# CAN Receiver Configuration\n\
+             # Path to CAN device\n\
+             device_port={}\n",
+            self.device_port
         );
 
         let mut file = fs::File::create(path)?;
@@ -118,6 +132,7 @@ fn get_config_path() -> Result<PathBuf> {
     Ok(exe_path)
 }
 
+#[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
 /// Parses string to CanBaudRate
 fn parse_can_baud_rate(value: &str) -> Result<CanBaudRate> {
     match value.to_lowercase().as_str() {
@@ -137,6 +152,7 @@ fn parse_can_baud_rate(value: &str) -> Result<CanBaudRate> {
     }
 }
 
+#[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
 /// Formats CanBaudRate to string
 fn format_can_baud_rate(rate: CanBaudRate) -> &'static str {
     match rate {
@@ -177,6 +193,7 @@ pub fn get_device_port() -> Result<String> {
     Ok(config.device_port.clone())
 }
 
+#[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
 /// Returns CAN speed
 pub fn get_can_baud_rate() -> Result<CanBaudRate> {
     let config = CONFIG.get()

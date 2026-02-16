@@ -12,12 +12,15 @@ embedded-can = "0.4.1"
 log = "0.4.29"
 simplelog = "0.12.2"
 time = { version = "0.3.44", features = ["serde"] }
-waveshare_usb_can_a = { package = "waveshare-usb-can-a", git = "https://github.com/im-0/rust-waveshare-usb-can-a", features = ["sync"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 futures-util = "0.3"
+
+# for x86_64 devices -> use waveshare_usb_can_a driver
+[target.'cfg(not(all(target_os = "linux", target_arch = "aarch64")))'.dependencies]
+waveshare_usb_can_a = { package = "waveshare-usb-can-a", git = "https://github.com/im-0/rust-waveshare-usb-can-a", features = ["sync"] }
 
 [profile.dev.package."*"]
 opt-level = 3

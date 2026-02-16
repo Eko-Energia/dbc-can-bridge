@@ -1,7 +1,11 @@
 mod setup;
 mod integration;
-mod app;
 mod websocket;
+#[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+mod app_waveshare;
+
+#[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+use app_waveshare::App;
 
 use std::fs::{File, create_dir_all};
 use std::net::SocketAddr;
@@ -10,7 +14,6 @@ use time::{OffsetDateTime, format_description::parse};
 use color_eyre::eyre::{Result, eyre};
 use log::LevelFilter;
 use setup::config;
-use app::App;
 use websocket::WebSocketServer;
 use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger};
 
