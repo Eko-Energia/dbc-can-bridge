@@ -214,7 +214,6 @@ ws.send(JSON.stringify({
 
 ## Wydajność
 
-- **Brak kopiowania**: Dane są serializowane bezpośrednio z referencji (`&str`, `&[SignalValueDto]`)
 - **Filtrowanie**: Aktualizacje są wysyłane tylko dla subskrybowanych wiadomości
 - **Non-blocking**: Jeśli kanał do klienta jest pełny, aktualizacja jest pomijana (klient nie blokuje głównej pętli CAN)
 - **Timestamp**: Format RFC3339 z nanosekundową precyzją
