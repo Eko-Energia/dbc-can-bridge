@@ -12,6 +12,15 @@ pub enum ClientMessage {
         #[serde(default)]
         message_names: Vec<String> 
     },
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    #[serde(rename = "transmit")]
+    Transmit {
+        message_id: u32,
+        data: Vec<u8>,
+        #[serde(default)]
+        is_extended: Option<bool>,
+    },
 }
 
 /// Messages from server to client
@@ -62,4 +71,12 @@ pub struct SignalData {
     pub name: String,
     pub value: f64,
     pub unit: String,
+}
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+#[derive(Debug, Clone)]
+pub struct CanTransmitRequest {
+    pub message_id: u32,
+    pub data: Vec<u8>,
+    pub is_extended: Option<bool>,
 }

@@ -110,21 +110,24 @@ fn get_default_device_port() -> String {
     {
         "can0".to_string()
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
     {
-        "/dev/ttyUSB0".to_string()
-    }
-    #[cfg(target_os = "windows")]
-    {
-        "COM4".to_string()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        "/dev/cu.wchusbserial110".to_string()
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-    {
-        "/dev/ttyUSB0".to_string() // Fallback for other systems
+        #[cfg(target_os = "linux")]
+        {
+            "/dev/ttyUSB0".to_string()
+        }
+        #[cfg(target_os = "windows")]
+        {
+            "COM4".to_string()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            "/dev/cu.wchusbserial110".to_string()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+        {
+            "/dev/ttyUSB0".to_string() // Fallback for other systems
+        }
     }
 }
 

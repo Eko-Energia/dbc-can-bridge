@@ -88,6 +88,31 @@ Wysyłany za każdym razem gdy dana wiadomość CAN się zaktualizuje (tylko sub
 }
 ```
 
+### 5. Transmit CAN (klient → serwer) *(tylko Linux/aarch64 + socketcan)*
+
+W trybie `socketcan` klient może wysłać żądanie nadania ramki CAN.
+Ta wiadomość nie używa DBC – serwer tylko przyjmuje `message_id` i `data` i wysyła ramkę na magistralę.
+
+```json
+{
+  "type": "transmit",
+  "message_id": 291,
+  "data": [1, 2, 3, 4],
+  "is_extended": false
+}
+```
+
+- `message_id` - identyfikator CAN jako liczba `u32`
+- `data` - payload ramki, `0..8` bajtów
+- `is_extended` *(opcjonalne)*:
+  - `true` → wymuś ID extended (29-bit)
+  - `false` → wymuś ID standard (11-bit)
+  - brak pola → auto: `<= 0x7FF` jako standard, powyżej jako extended
+
+Uwagi:
+- Jeśli długość `data` > 8, ramka jest odrzucana.
+- W trybie innym niż Linux/aarch64 (`waveshare`) wiadomość `transmit` nie jest obsługiwana.
+
 ## Przykłady użycia
 
 ### JavaScript/TypeScript (przeglądarka)
@@ -106,6 +131,14 @@ ws.onopen = () => {
   
   // Lub subskrybuj wszystko:
   // ws.send(JSON.stringify({ type: 'subscribe', message_names: [] }));
+
+  // (Linux/aarch64 + socketcan) Nadaj prostą ramkę CAN
+  ws.send(JSON.stringify({
+    type: 'transmit',
+    message_id: 0x123,
+    data: [0x01, 0x02, 0x03],
+    is_extended: false
+  }));
 };
 
 ws.onmessage = (event) => {
@@ -147,6 +180,14 @@ async def can_client():
             'type': 'subscribe',
             'message_names': ['BMS_Status', 'Motor_Speed']
         }))
+
+    # (Linux/aarch64 + socketcan) Nadaj prostą ramkę CAN
+    await websocket.send(json.dumps({
+      'type': 'transmit',
+      'message_id': 0x123,
+      'data': [0x01, 0x02, 0x03],
+      'is_extended': False
+    }))
         
         async for message in websocket:
             data = json.loads(message)
@@ -184,6 +225,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "message_names": ["BMS_Status", "Motor_Speed"]
     });
     write.send(Message::Text(subscribe_msg.to_string())).await?;
+
+    // (Linux/aarch64 + socketcan) Nadaj prostą ramkę CAN
+    let transmit_msg = json!({
+      "type": "transmit",
+      "message_id": 0x123,
+      "data": [0x01, 0x02, 0x03],
+      "is_extended": false
+    });
+    write.send(Message::Text(transmit_msg.to_string())).await?;
     
     // Odbieraj wiadomości
     while let Some(msg) = read.next().await {

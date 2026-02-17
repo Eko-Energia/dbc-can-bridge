@@ -9,6 +9,8 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::types::{CanUpdate, ClientMessage, MapEntryDto, ServerMessage, SignalValueDto};
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+use super::types::CanTransmitRequest;
 
 type ClientId = usize;
 
@@ -20,6 +22,8 @@ struct ClientState {
 pub struct WebSocketServer {
     update_rx: mpsc::UnboundedReceiver<CanUpdate>,
     update_tx: mpsc::UnboundedSender<CanUpdate>,
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    can_tx: Option<mpsc::UnboundedSender<CanTransmitRequest>>,
     clients: Arc<RwLock<HashMap<ClientId, ClientState>>>,
     next_client_id: Arc<RwLock<ClientId>>,
     // Cache ostatnich stanów dla snapshot
@@ -33,6 +37,8 @@ impl WebSocketServer {
         Self {
             update_rx,
             update_tx,
+            #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+            can_tx: None,
             clients: Arc::new(RwLock::new(HashMap::new())),
             next_client_id: Arc::new(RwLock::new(0)),
             cache: Arc::new(RwLock::new(HashMap::new())),
@@ -42,6 +48,11 @@ impl WebSocketServer {
     /// Returns sender for sending CAN updates
     pub fn get_update_sender(&self) -> mpsc::UnboundedSender<CanUpdate> {
         self.update_tx.clone()
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    pub fn set_can_tx_sender(&mut self, tx: mpsc::UnboundedSender<CanTransmitRequest>) {
+        self.can_tx = Some(tx);
     }
 
     /// Starts the WebSocket server
@@ -103,6 +114,8 @@ impl WebSocketServer {
         let clients = self.clients.clone();
         let next_client_id = self.next_client_id.clone();
         let cache = self.cache.clone();
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        let can_tx = self.can_tx.clone();
 
         loop {
             match listener.accept().await {
@@ -121,6 +134,8 @@ impl WebSocketServer {
                         client_id,
                         clients.clone(),
                         cache.clone(),
+                        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+                        can_tx.clone(),
                     ));
                 }
                 Err(e) => {
@@ -136,6 +151,8 @@ async fn handle_connection(
     client_id: ClientId,
     clients: Arc<RwLock<HashMap<ClientId, ClientState>>>,
     cache: Arc<RwLock<HashMap<String, CanUpdate>>>,
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    can_tx: Option<mpsc::UnboundedSender<CanTransmitRequest>>,
 ) {
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
@@ -196,6 +213,27 @@ async fn handle_connection(
 
                             // Send snapshot from cache for subscribed messages
                             send_snapshot(&tx, &cache, subscriptions.as_ref()).await;
+                        }
+
+                        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+                        ClientMessage::Transmit {
+                            message_id,
+                            data,
+                            is_extended,
+                        } => {
+                            if let Some(ref tx_can) = can_tx {
+                                let req = CanTransmitRequest {
+                                    message_id,
+                                    data,
+                                    is_extended,
+                                };
+
+                                if tx_can.send(req).is_err() {
+                                    error!("CAN transmit channel closed, client {} request dropped", client_id);
+                                }
+                            } else {
+                                warn!("Client {} sent transmit request, but CAN TX channel is not configured", client_id);
+                            }
                         }
                     }
                 } else {

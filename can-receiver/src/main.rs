@@ -49,7 +49,17 @@ fn main() -> Result<()> {
         config::init_config()?;
         
         // Create WebSocket server
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        let (ws_server, ws_can_rx) = {
+            let mut ws_server = WebSocketServer::new();
+            let (ws_can_tx, ws_can_rx) = tokio::sync::mpsc::unbounded_channel();
+            ws_server.set_can_tx_sender(ws_can_tx);
+            (ws_server, ws_can_rx)
+        };
+
+        #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
         let ws_server = WebSocketServer::new();
+
         let ws_tx = ws_server.get_update_sender();
         
         // Start WebSocket server in background
@@ -74,6 +84,8 @@ fn main() -> Result<()> {
         // Initialize and run CAN receiver app
         let mut app = App::new()?;
         app.set_websocket_sender(ws_tx);
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        app.set_websocket_receiver(ws_can_rx);
         app.run()
     })();
 
