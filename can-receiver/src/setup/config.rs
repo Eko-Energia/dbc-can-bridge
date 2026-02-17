@@ -106,6 +106,10 @@ impl Config {
 
 /// Returns default device path depending on operating system
 fn get_default_device_port() -> String {
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        "can0".to_string()
+    }
     #[cfg(target_os = "linux")]
     {
         "/dev/ttyUSB0".to_string()
