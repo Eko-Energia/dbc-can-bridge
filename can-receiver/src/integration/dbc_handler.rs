@@ -1,8 +1,7 @@
 use color_eyre::eyre::{Result, eyre};
 use std::{cmp::min, collections::HashMap, ffi::OsStr, fs, path::PathBuf};
-use embedded_can::{Frame as FrameTrait, Id};
-use waveshare_usb_can_a::Frame;
 use can_dbc::{Dbc, ByteOrder, ValueType};
+use embedded_can::{Frame, Id};
 
 #[derive(Debug, Clone)]
 pub struct SignalValue<'a> {
@@ -40,7 +39,7 @@ impl DbcHandler {
         })
     }
 
-    pub fn decode(&'_ self, frame: Frame) -> Result<(&'_ String, Vec<SignalValue<'_>>)> {
+    pub fn decode<T: Frame>(&'_ self, frame: T) -> Result<(&'_ String, Vec<SignalValue<'_>>)> {
         if frame.data().is_empty() || frame.data().len() > 8 {
             return Err(eyre!("Error: Frame ID: {:?} is either empty or data exceeds 8 bytes!", frame.id()));
         }

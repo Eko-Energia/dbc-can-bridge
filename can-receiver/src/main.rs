@@ -3,9 +3,13 @@ mod integration;
 mod websocket;
 #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
 mod app_waveshare;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+mod app_socketcan;
 
 #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
 use app_waveshare::App;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+use app_socketcan::App;
 
 use std::fs::{File, create_dir_all};
 use std::net::SocketAddr;
