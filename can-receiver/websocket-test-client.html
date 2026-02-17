@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAN Monitor - WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #4ec9b0;
+            border-bottom: 2px solid #4ec9b0;
+            padding-bottom: 10px;
+        }
+        .controls {
+            background: #252526;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #3e3e42;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #0e639c;
+            color: white;
+        }
+        .status.disconnected {
+            background: #3e1e68;
+            color: #ce9178;
+        }
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+        button:disabled {
+            background: #3e3e42;
+            cursor: not-allowed;
+        }
+        input[type="text"] {
+            background: #3c3c3c;
+            border: 1px solid #3e3e42;
+            color: #d4d4d4;
+            padding: 8px;
+            border-radius: 4px;
+            width: 400px;
+            font-size: 14px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #9cdcfe;
+        }
+        .section {
+            background: #252526;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #3e3e42;
+        }
+        .message-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 15px;
+        }
+        .message-card {
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            border-radius: 6px;
+            padding: 15px;
+        }
+        .message-card.updated {
+            border-color: #4ec9b0;
+            box-shadow: 0 0 10px rgba(78, 201, 176, 0.3);
+        }
+        .message-name {
+            font-size: 16px;
+            font-weight: bold;
+            color: #4ec9b0;
+            margin-bottom: 10px;
+        }
+        .timestamp {
+            font-size: 11px;
+            color: #858585;
+            margin-bottom: 10px;
+        }
+        .signal {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #2d2d30;
+        }
+        .signal:last-child {
+            border-bottom: none;
+        }
+        .signal-name {
+            color: #9cdcfe;
+            font-weight: 500;
+        }
+        .signal-value {
+            color: #ce9178;
+            font-family: 'Consolas', monospace;
+        }
+        .signal-unit {
+            color: #858585;
+            margin-left: 5px;
+        }
+        .log {
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            padding: 15px;
+            border-radius: 6px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            padding: 2px 0;
+            border-bottom: 1px solid #2d2d30;
+        }
+        .log-time {
+            color: #858585;
+        }
+        .log-snapshot {
+            color: #4ec9b0;
+        }
+        .log-update {
+            color: #9cdcfe;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚗 CAN Monitor - WebSocket Test Client</h1>
+    
+    <div class="controls">
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div style="margin-bottom: 15px;">
+            <label for="wsUrl">WebSocket URL:</label>
+            <input type="text" id="wsUrl" value="ws://localhost:8080">
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+            <label for="subscription">Message Names (comma-separated, empty = all):</label>
+            <input type="text" id="subscription" placeholder="e.g., BMS_Status, Motor_Speed">
+        </div>
+        
+        <button id="connectBtn" onclick="connect()">Connect</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        <button onclick="subscribeToMessages()">Subscribe</button>
+        <button onclick="clearMessages()">Clear Messages</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <div class="section">
+        <h2>📊 CAN Messages (<span id="messageCount">0</span>)</h2>
+        <div id="messages" class="message-grid"></div>
+    </div>
+
+    <div class="section">
+        <h2>📝 Event Log</h2>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messages = new Map();
+        let updateAnimations = new Map();
+
+        function connect() {
+            const url = document.getElementById('wsUrl').value;
+            
+            try {
+                ws = new WebSocket(url);
+                
+                ws.onopen = () => {
+                    log('Connected to ' + url, 'snapshot');
+                    document.getElementById('status').textContent = 'Connected to ' + url;
+                    document.getElementById('status').className = 'status connected';
+                    document.getElementById('connectBtn').disabled = true;
+                    document.getElementById('disconnectBtn').disabled = false;
+                    
+                    // Auto-subscribe after connection
+                    subscribeToMessages();
+                };
+                
+                ws.onmessage = (event) => {
+                    const msg = JSON.parse(event.data);
+                    
+                    if (msg.type === 'snapshot') {
+                        log('Received snapshot with ' + Object.keys(msg.data).length + ' messages', 'snapshot');
+                        messages.clear();
+                        for (const [msgName, entry] of Object.entries(msg.data)) {
+                            messages.set(msgName, entry);
+                        }
+                        renderMessages();
+                    } 
+                    else if (msg.type === 'update') {
+                        log('Update: ' + msg.message_name, 'update');
+                        messages.set(msg.message_name, msg.entry);
+                        renderMessages();
+                        highlightUpdate(msg.message_name);
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    log('WebSocket error: ' + error, 'error');
+                };
+                
+                ws.onclose = () => {
+                    log('Disconnected', 'error');
+                    document.getElementById('status').textContent = 'Disconnected';
+                    document.getElementById('status').className = 'status disconnected';
+                    document.getElementById('connectBtn').disabled = false;
+                    document.getElementById('disconnectBtn').disabled = true;
+                };
+            } catch (error) {
+                log('Failed to connect: ' + error, 'error');
+            }
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function subscribeToMessages() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected!', 'error');
+                return;
+            }
+            
+            const input = document.getElementById('subscription').value.trim();
+            const messageNames = input ? input.split(',').map(s => s.trim()).filter(s => s) : [];
+            
+            const subscribeMsg = {
+                type: 'subscribe',
+                message_names: messageNames
+            };
+            
+            ws.send(JSON.stringify(subscribeMsg));
+            log('Subscribed to: ' + (messageNames.length > 0 ? messageNames.join(', ') : 'ALL'), 'snapshot');
+        }
+        
+        function renderMessages() {
+            const container = document.getElementById('messages');
+            const messageCount = document.getElementById('messageCount');
+            
+            container.innerHTML = '';
+            messageCount.textContent = messages.size;
+            
+            const sortedMessages = Array.from(messages.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+            
+            for (const [msgName, entry] of sortedMessages) {
+                const card = document.createElement('div');
+                card.className = 'message-card';
+                card.id = 'msg-' + msgName;
+                
+                const nameDiv = document.createElement('div');
+                nameDiv.className = 'message-name';
+                nameDiv.textContent = msgName;
+                card.appendChild(nameDiv);
+                
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'timestamp';
+                timeDiv.textContent = new Date(entry.timestamp).toLocaleString('pl-PL', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    fractionalSecondDigits: 3
+                });
+                card.appendChild(timeDiv);
+                
+                for (const signal of entry.signals) {
+                    const signalDiv = document.createElement('div');
+                    signalDiv.className = 'signal';
+                    
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'signal-name';
+                    nameSpan.textContent = signal.name;
+                    
+                    const valueSpan = document.createElement('span');
+                    const valueText = document.createElement('span');
+                    valueText.className = 'signal-value';
+                    valueText.textContent = signal.value.toFixed(2);
+                    valueSpan.appendChild(valueText);
+                    
+                    if (signal.unit) {
+                        const unitText = document.createElement('span');
+                        unitText.className = 'signal-unit';
+                        unitText.textContent = signal.unit;
+                        valueSpan.appendChild(unitText);
+                    }
+                    
+                    signalDiv.appendChild(nameSpan);
+                    signalDiv.appendChild(valueSpan);
+                    card.appendChild(signalDiv);
+                }
+                
+                container.appendChild(card);
+            }
+        }
+        
+        function highlightUpdate(msgName) {
+            const card = document.getElementById('msg-' + msgName);
+            if (!card) return;
+            
+            // Clear previous animation
+            if (updateAnimations.has(msgName)) {
+                clearTimeout(updateAnimations.get(msgName));
+            }
+            
+            card.classList.add('updated');
+            const timeout = setTimeout(() => {
+                card.classList.remove('updated');
+                updateAnimations.delete(msgName);
+            }, 300);
+            
+            updateAnimations.set(msgName, timeout);
+        }
+        
+        function log(message, type = '') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            const time = new Date().toLocaleTimeString('pl-PL', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                fractionalSecondDigits: 3
+            });
+            
+            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${type}">${message}</span>`;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+            
+            // Keep only last 100 entries
+            while (logDiv.children.length > 100) {
+                logDiv.removeChild(logDiv.lastChild);
+            }
+        }
+        
+        function clearMessages() {
+            messages.clear();
+            renderMessages();
+            log('Cleared all messages');
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+    </script>
+</body>
+</html>

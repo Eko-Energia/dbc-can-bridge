@@ -1,7 +1,10 @@
 use super::*;
 use color_eyre::Result;
 use embedded_can::{Frame as FrameTrait, Id};
+#[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
 use waveshare_usb_can_a::Frame;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+use socketcan::{CanFrame as Frame};
 
 #[test]
 #[ignore] // Requires actual DBC file in exe directory

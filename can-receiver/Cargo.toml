@@ -1,6 +1,6 @@
 [package]
 name = "can-receiver"
-version = "0.1.2"
+version = "0.1.4"
 edition = "2024"
 authors = []
 license = "MIT"
@@ -12,7 +12,19 @@ embedded-can = "0.4.1"
 log = "0.4.29"
 simplelog = "0.12.2"
 time = { version = "0.3.44", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.28"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+futures-util = "0.3"
+
+# for x86_64 devices -> use waveshare_usb_can_a driver
+[target.'cfg(not(all(target_os = "linux", target_arch = "aarch64")))'.dependencies]
 waveshare_usb_can_a = { package = "waveshare-usb-can-a", git = "https://github.com/im-0/rust-waveshare-usb-can-a", features = ["sync"] }
+
+# for arm64 -> use socketcan
+[target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
+socketcan = { version = "3.5.0", features = ["tokio"] }
 
 [profile.dev.package."*"]
 opt-level = 3
