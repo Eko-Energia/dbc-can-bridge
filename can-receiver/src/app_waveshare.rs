@@ -93,6 +93,11 @@ impl App {
                     warn!("Timeout - no frame received, continuing...");
                     continue;
                 }
+
+                Err(ws::sync::Error::RecvUnexpected(_e)) => {
+                    // warn!("Recoverable receiver sync error: {}, continuing...", _e);
+                    continue;
+                }
                 
                 Err(e) => {
                     return Err(eyre!("Error receiving frame: {}", e));
