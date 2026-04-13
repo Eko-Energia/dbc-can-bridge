@@ -73,6 +73,8 @@ Uruchomienie socketcan wymaga podłączenia oraz konfiguracji odpowiedniego modu
     ```
     ls /sys/bus/spi/devices/spi0.0/net
     ```
+
+    Wprowadź tę nazwę jako `device_port=` w pliku `config.txt`.
     
 6. Skonfiguruj socketcan:
     ```
