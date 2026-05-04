@@ -1,3 +1,5 @@
+[🇬🇧 English Version](readme.md)
+
 # Perla Bus Simulator
 
 Symulator szyny CAN wysyłający losowe ramki zgodne z definicjami z pliku DBC.
@@ -106,8 +108,6 @@ Symulator implementuje protokół Waveshare USB-CAN-A:
 - `D0..D7`: dane (z paddingiem `0x00` do 8 bajtów)
 - Byte `0x00` przed checksum to pole zarezerwowane
 - `Checksum`: suma bajtów od `[0x01]` do pola zarezerwowanego (włącznie) modulo 256
-
-##`
 
 ## Plik DBC
 

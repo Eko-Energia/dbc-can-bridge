@@ -1,13 +1,29 @@
-# Odbiornik i dekoder CAN
+[🇬🇧 English Version](readme.md)
 
-Ten program służy do odbierania i dekodowania ramek CAN na podstawie dostarczonego pliku DBC. Ma 2 tryby działania (zależne od architektury procesora):
+# CAN-Bridge: Odbiornik i Dekoder CAN 📡
 
-1. x86-64
-    - Obsługa dongla **Waveshare USB-CAN-A** - zawiera wbudowane sterowniki dla wszystkich systemów (Linux, Windows, MacOS)
-2. arm64 (Linux)
-    - Odbiór ramek poprzez moduł zgodny z `socketcan`
+![Rust](https://img.shields.io/badge/Rust-2024-orange)
+![License](https://img.shields.io/badge/License-MIT-blue)
 
-## Funkcje:
+Aplikacja real-time do odbierania, dekodowania i monitorowania ramek CAN. Obsługuje integrację z aplikacjami webowymi poprzez WebSocket API.
+
+## Obsługiwane Platformy
+
+| Architektura | Interfejs | Systemy |
+|---|---|---|
+| **x86-64** | Waveshare USB-CAN-A | Windows, macOS, Linux |
+| **ARM64** | SocketCAN | Raspberry Pi, NVIDIA Jetson, Linux |
+
+## Główne Cechy
+
+- **Automatyczne dekodowanie CAN**: Pełna obsługa formatu DBC
+- **Real-time Processing**: Ciągły odbiór i przetwarzanie ramek CAN
+- **WebSocket API**: Zdalny dostęp do danych w czasie rzeczywistym
+- **Snapshot + Delta Updates**: Optymalizacja transferu danych
+- **Filtrowanie Wiadomości**: Obsługa subskrybcji
+- **Konfiguracja**: Generowanie pliku `config.txt`
+
+## Funkcje Szczegółowe
 
 1. **Tworzenie pliku konfiguracyjnego**: Program tworzy plik konfiguracyjny i ładuje z niego konfigurację.
 2. **Ładowanie pliku DBC**: Ładuje i parsuje plik `.dbc` umieszczony w tym samym folderze co plik wykonywalny programu.
@@ -27,7 +43,7 @@ Ten program służy do odbierania i dekodowania ramek CAN na podstawie dostarczo
      ```bash
      # jednorazowo nadaj uprawnienia
      chmod u+r+w+x can-receiver
-     
+
      ./can-receiver
      ```
      (w terminalu)
@@ -75,7 +91,7 @@ Uruchomienie socketcan wymaga podłączenia oraz konfiguracji odpowiedniego modu
     ```
 
     Wprowadź tę nazwę jako `device_port=` w pliku `config.txt`.
-    
+
 6. Skonfiguruj socketcan:
     ```
     sudo ip link set can0 up type can bitrate 500000
@@ -83,6 +99,8 @@ Uruchomienie socketcan wymaga podłączenia oraz konfiguracji odpowiedniego modu
 
     Uwaga! To polecenie należy wywołać bo każdym ponownym uruchomieniu systemu.
 7. Uruchom program w standardowy sposób.
+
+---
 
 ## WebSocket API
 
@@ -92,7 +110,7 @@ Program automatycznie uruchamia serwer WebSocket na `ws://0.0.0.0:8080`, który 
 
 1. Otwórz plik `websocket-test-client.html` w przeglądarce
 2. Kliknij "Connect" - automatycznie połączy się i pobierze wszystkie dane
-3. Obserwuj aktualizacje w czasie rzeczywistym
+3. Obserwuj dane CAN w czasie rzeczywistym
 
 ### Możliwości
 
@@ -102,19 +120,35 @@ Program automatycznie uruchamia serwer WebSocket na `ws://0.0.0.0:8080`, który 
 
 Szczegóły API i przykłady w różnych językach: [WEBSOCKET_API.md](WEBSOCKET_API.md)
 
-## Kompilacja
+---
+
+## Kompilacja ze Źródła
 
 ### Standardowa
-```
+
+```bash
 cargo build --release
 ```
 
 ### Cross-compile na arm64 (np. Raspberry Pi):
-```
+```bash
 sudo apt install zig
 cargo install cargo-zigbuild
 rustup target add aarch64-unknown-linux-gnu
 ```
-```
+```bash
 cargo zigbuild --target aarch64-unknown-linux-gnu --release
 ```
+
+---
+
+## Dokumentacja
+
+- **WebSocket API**: [WEBSOCKET_API.md](WEBSOCKET_API.md)
+- **CAN Simulator**: [vcan-sim/readme.md](vcan-sim/readme.md)
+
+---
+
+## Licencja
+
+MIT License - patrz [LICENSE](LICENSE)
