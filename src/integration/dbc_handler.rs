@@ -17,8 +17,8 @@ pub struct DbcHandler {
 
 impl DbcHandler {
     pub fn new() -> Result<Self> {
-        let data = fs::read_to_string(find_first_dbc_in_exe_dir()?).expect("Unable to read input file");
-        let dbc = Dbc::try_from(data.as_str()).expect("Failed to parse dbc file");
+        let data = fs::read_to_string(find_first_dbc_in_exe_dir()?)?;
+        let dbc = Dbc::try_from(data.as_str())?;
 
         // for debug purposes
         // println!("{:#?}", dbc);
