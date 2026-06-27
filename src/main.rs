@@ -13,13 +13,13 @@ use app_socketcan::App;
 
 use std::fs::{File, create_dir_all};
 use std::net::SocketAddr;
-use time::{OffsetDateTime, format_description::parse};
+use time::{OffsetDateTime};
 
 use color_eyre::eyre::{Result, eyre};
 use log::LevelFilter;
 use setup::config;
 use websocket::WebSocketServer;
-use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger};
+use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger, format_description};
 
 extern crate simplelog;
 #[macro_use] extern crate log;
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
         .build();
 
     create_dir_all("logs")?;
-    let fmt = parse("[year]-[month]-[day]_[hour]-[minute]-[second]")?;
+    let fmt = format_description!("[year]-[month]-[day]_[hour]-[minute]-[second]");
     let ts = OffsetDateTime::now_local()?.format(&fmt)?;
     let log_filename = format!("logs/can-receiver-{}.log", ts);
 

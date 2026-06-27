@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+use std::thread::sleep;
 use std::time::Duration;
 
 use color_eyre::eyre::{Result, eyre};
@@ -10,6 +12,9 @@ use crate::setup::config;
 use crate::integration::dbc_handler::DbcHandler;
 use crate::websocket::{CanUpdate, SignalData};
 use tokio::sync::mpsc;
+
+#[cfg(target_os = "windows")]
+const SLEEP_TIME: Duration = Duration::from_millis(5);
 
 pub struct App {
     dbc_handler: DbcHandler,
@@ -90,7 +95,11 @@ impl App {
                 }
                 
                 Err(ws::sync::Error::SerialReadTimedOut) => {
+                    // blocking read is bugged on Windows
+                    #[cfg(not(target_os = "windows"))]
                     warn!("Timeout - no frame received, continuing...");
+                    #[cfg(target_os = "windows")]
+                    sleep(SLEEP_TIME);
                     continue;
                 }
 
