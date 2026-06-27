@@ -108,7 +108,7 @@ impl Config {
         let content = format!(
             "# CAN Receiver Configuration\n\
              # Path to CAN device\n\
-             device_port={}\n
+             device_port={}\n\
              save_logs={}\n",
             self.device_port,
             self.save_logs
