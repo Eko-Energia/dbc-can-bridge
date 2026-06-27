@@ -13,19 +13,21 @@ use app_socketcan::App;
 
 use std::fs::{File, create_dir_all};
 use std::net::SocketAddr;
-use time::{OffsetDateTime, format_description::parse};
+use time::{OffsetDateTime};
 
 use color_eyre::eyre::{Result, eyre};
 use log::LevelFilter;
 use setup::config;
 use websocket::WebSocketServer;
-use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger};
+use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, SharedLogger, TermLogger, TerminalMode, WriteLogger, format_description};
 
 extern crate simplelog;
 #[macro_use] extern crate log;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+    // Initialize configuration
+    config::init_config()?;
 
     let log_config = ConfigBuilder::new()
         .set_time_offset_to_local()
@@ -33,21 +35,23 @@ fn main() -> Result<()> {
         .build();
 
     create_dir_all("logs")?;
-    let fmt = parse("[year]-[month]-[day]_[hour]-[minute]-[second]")?;
+    let fmt = format_description!("[year]-[month]-[day]_[hour]-[minute]-[second]");
     let ts = OffsetDateTime::now_local()?.format(&fmt)?;
     let log_filename = format!("logs/can-receiver-{}.log", ts);
 
-    CombinedLogger::init(
-        vec![
-        TermLogger::new(LevelFilter::Debug, log_config.clone(), TerminalMode::Mixed, ColorChoice::Auto),
-        WriteLogger::new(LevelFilter::Debug, log_config, File::create(log_filename)?),
-    ]
-    )?;
+    let save_logs = config::get_save_logs()?;
 
-    let result = (|| -> Result<_> {
-        // Initialize configuration
-        config::init_config()?;
-        
+    let mut logger: Vec<Box<dyn SharedLogger>>  = vec![
+        TermLogger::new(LevelFilter::Debug, log_config.clone(), TerminalMode::Mixed, ColorChoice::Auto)
+    ];
+
+    if save_logs {
+        logger.push(WriteLogger::new(LevelFilter::Debug, log_config, File::create(log_filename)?));
+    }
+
+    CombinedLogger::init(logger)?;
+
+    let result = (|| -> Result<_> {        
         // Create WebSocket server
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
         let (ws_server, ws_can_rx) = {
