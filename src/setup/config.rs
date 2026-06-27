@@ -14,6 +14,7 @@ const CONFIG_FILE_NAME: &str = "config.txt";
 #[derive(Debug, Clone)]
 pub struct Config {
     pub device_port: String,
+    pub save_logs: bool,
     #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
     pub can_baud_rate: CanBaudRate,
 }
@@ -22,6 +23,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             device_port: get_default_device_port(),
+            save_logs: true,
             #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
             can_baud_rate: CanBaudRate::R500kBd,
         }
@@ -62,6 +64,16 @@ impl Config {
                     "device_port" => {
                         config.device_port = value.to_string();
                     }
+                    "save_logs" => {
+                        config.save_logs = match value {
+                            "true" => true,
+                            "false" => false,
+                            _ => {
+                                println!("Unknown `save_logs` value, defaulting to true...");
+                                true
+                            }                            
+                        }
+                    }
                     #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
                     "can_baud_rate" => {
                         config.can_baud_rate = parse_can_baud_rate(value)?;
@@ -83,10 +95,12 @@ impl Config {
             "# CAN Receiver Configuration\n\
              # Path to CAN device\n\
              device_port={}\n\
+             save_logs={}\n\
              \n\
              # CAN transmission speed (5k, 10k, 20k, 50k, 100k, 125k, 200k, 250k, 400k, 500k, 800k, 1000k)\n\
              can_baud_rate={}\n",
             self.device_port,
+            self.save_logs,
             format_can_baud_rate(self.can_baud_rate)
         );
 
@@ -94,8 +108,10 @@ impl Config {
         let content = format!(
             "# CAN Receiver Configuration\n\
              # Path to CAN device\n\
-             device_port={}\n",
-            self.device_port
+             device_port={}\n
+             save_logs={}\n",
+            self.device_port,
+            self.save_logs
         );
 
         let mut file = fs::File::create(path)?;
@@ -198,6 +214,16 @@ pub fn get_device_port() -> Result<String> {
         .map_err(|_| eyre!("Configuration access error"))?;
     
     Ok(config.device_port.clone())
+}
+
+/// Returns save logs bool
+pub fn get_save_logs() -> Result<bool> {
+    let config = CONFIG.get()
+        .ok_or_else(|| eyre!("Configuration not initialized. Call init_config() first."))?
+        .lock()
+        .map_err(|_| eyre!("Configuration access error"))?;
+    
+    Ok(config.save_logs)
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
