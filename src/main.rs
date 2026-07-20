@@ -65,7 +65,12 @@ fn main() -> Result<()> {
         let ws_server = WebSocketServer::new();
 
         let ws_tx = ws_server.get_update_sender();
-        
+        let raw_tx = if config::get_broadcast_raw_frames()? {
+            Some(ws_server.get_raw_update_sender())
+        } else {
+            None
+        };
+
         // Start WebSocket server in background
         let ws_addr: SocketAddr = "0.0.0.0:8080".parse()?;
         info!("Starting WebSocket server on {}", ws_addr);
@@ -88,6 +93,9 @@ fn main() -> Result<()> {
         // Initialize and run CAN receiver app
         let mut app = App::new()?;
         app.set_websocket_sender(ws_tx);
+        if let Some(raw_tx) = raw_tx {
+            app.set_raw_sender(raw_tx);
+        }
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
         app.set_websocket_receiver(ws_can_rx);
         app.run()

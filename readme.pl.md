@@ -64,6 +64,15 @@ Aplikacja real-time do odbierania, dekodowania i monitorowania ramek CAN. Obsłu
 4. **Umieść plik DBC**: Umieść plik DBC w katalogu z plikiem wykonywalnym.
 5. **Uruchom program**: Użyj polecenia podobnego jak na początku.
 
+## Opcje konfiguracji
+
+Plik `config.txt` (tworzony przy pierwszym uruchomieniu, patrz krok 3 powyżej) obsługuje następujące klucze:
+
+- `device_port` - ścieżka do urządzenia CAN
+- `save_logs` - `true`/`false`, domyślnie `true` - zapisywanie logów do pliku
+- `can_baud_rate` - prędkość magistrali CAN (tylko Waveshare), domyślnie `500k`
+- `broadcast_raw_frames` - `true`/`false`, domyślnie `false` - przesyłanie surowych ramek CAN przez WebSocket, patrz [WEBSOCKET_API.md](WEBSOCKET_API.md)
+
 ## Uruchomienie na arm64 (z socketcan)
 
 Uruchomienie socketcan wymaga podłączenia oraz konfiguracji odpowiedniego modułu. Poniżej znajduje się przykład dla `MCP2515` na Raspberry Pi 4B:

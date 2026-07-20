@@ -7,15 +7,16 @@ use socketcan::tokio::CanSocket;
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
 
-use crate::integration::dbc_handler::DbcHandler;
+use crate::integration::dbc_handler::{unpack_id, DbcHandler};
 use crate::setup::config;
-use crate::websocket::{CanTransmitRequest, CanUpdate, SignalData};
+use crate::websocket::{CanTransmitRequest, CanUpdate, RawFrame, SignalData};
 
 pub struct App {
     dbc_handler: Arc<DbcHandler>,
     interface_name: String,
     ws_tx: Option<mpsc::UnboundedSender<CanUpdate>>,
     ws_rx: Option<mpsc::UnboundedReceiver<CanTransmitRequest>>,
+    raw_tx: Option<mpsc::UnboundedSender<RawFrame>>,
 }
 
 impl App {
@@ -35,6 +36,7 @@ impl App {
             interface_name,
             ws_tx: None,
             ws_rx: None,
+            raw_tx: None,
         })
     }
 
@@ -45,6 +47,10 @@ impl App {
 
     pub fn set_websocket_receiver(&mut self, rx: mpsc::UnboundedReceiver<CanTransmitRequest>) {
         self.ws_rx = Some(rx);
+    }
+
+    pub fn set_raw_sender(&mut self, tx: mpsc::UnboundedSender<RawFrame>) {
+        self.raw_tx = Some(tx);
     }
 
     pub fn run(&mut self) -> Result<()> {
@@ -60,36 +66,50 @@ impl App {
 
         let dbc_handler = Arc::clone(&self.dbc_handler);
         let ws_tx = self.ws_tx.clone();
+        let raw_tx = self.raw_tx.clone();
 
         let rx_task: tokio::task::JoinHandle<Result<()>> = tokio::spawn(async move {
             loop {
                 match read_socket.read_frame().await {
-                    Ok(frame) => match dbc_handler.decode(frame) {
-                        Ok((msg_name, signals)) => {
-                            let timestamp = OffsetDateTime::now_local()?;
+                    Ok(frame) => {
+                        let timestamp = OffsetDateTime::now_local()?;
 
-                            if let Some(ref tx) = ws_tx {
-                                let update = CanUpdate {
-                                    message_name: msg_name.to_string(),
-                                    signals:
-                                        signals
-                                        .iter()
-                                        .map(|s| SignalData {
-                                            name: s.name.to_string(),
-                                            value: s.value,
-                                            unit: s.unit.to_string(),
-                                        })
-                                        .collect(),
-                                    timestamp,
-                                };
+                        // Raw path: capture the frame before decode() consumes it.
+                        if let Some(ref raw_tx) = raw_tx {
+                            let (message_id, is_extended) = unpack_id(&frame.id());
+                            let _ = raw_tx.send(RawFrame {
+                                message_id,
+                                is_extended,
+                                data: frame.data().to_vec(),
+                                timestamp,
+                            });
+                        }
 
-                                let _ = tx.send(update);
+                        match dbc_handler.decode(frame) {
+                            Ok((msg_name, signals)) => {
+                                if let Some(ref tx) = ws_tx {
+                                    let update = CanUpdate {
+                                        message_name: msg_name.to_string(),
+                                        signals:
+                                            signals
+                                            .iter()
+                                            .map(|s| SignalData {
+                                                name: s.name.to_string(),
+                                                value: s.value,
+                                                unit: s.unit.to_string(),
+                                            })
+                                            .collect(),
+                                        timestamp,
+                                    };
+
+                                    let _ = tx.send(update);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Error decoding frame: {}", e);
                             }
                         }
-                        Err(e) => {
-                            error!("Error decoding frame: {}", e);
-                        }
-                    },
+                    }
                     Err(e) => {
                         return Err(eyre!("SocketCAN read error: {}", e));
                     }

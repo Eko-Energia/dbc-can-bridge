@@ -64,6 +64,15 @@ Real-time application for receiving, decoding, and monitoring CAN frames. Suppor
 4. **Place the DBC file**: Put the DBC file in the same directory as the executable.
 5. **Run the program**: Use the same command as above.
 
+## Configuration Options
+
+The `config.txt` file (created on first run, see step 3 above) supports the following keys:
+
+- `device_port` - path to the CAN device
+- `save_logs` - `true`/`false`, default `true` - save logs to a file
+- `can_baud_rate` - CAN bus speed (Waveshare only), default `500k`
+- `broadcast_raw_frames` - `true`/`false`, default `false` - broadcast raw CAN frames over WebSocket, see [WEBSOCKET_API.md](WEBSOCKET_API.md)
+
 ## Running on ARM64 (with socketcan)
 
 SocketCAN requires connecting and configuring a compatible module. Below is an example for `MCP2515` on Raspberry Pi 4B:

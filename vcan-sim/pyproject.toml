@@ -1,0 +1,10 @@
+[project]
+name = "vcan-sim"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "cantools>=42.0.3",
+    "python-can>=4.6.1",
+]

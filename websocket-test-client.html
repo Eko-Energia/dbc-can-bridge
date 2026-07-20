@@ -217,7 +217,9 @@
                         renderMessages();
                     } 
                     else if (msg.type === 'update') {
-                        log('Update: ' + msg.message_name, 'update');
+                        // Note: intentionally NOT logging every update - on a busy
+                        // bus that floods the log. The card grid already shows the
+                        // live value; the log is for meaningful events only.
                         messages.set(msg.message_name, msg.entry);
                         renderMessages();
                         highlightUpdate(msg.message_name);

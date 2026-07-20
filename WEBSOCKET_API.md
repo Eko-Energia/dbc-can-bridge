@@ -88,7 +88,65 @@ Wysyłany za każdym razem gdy dana wiadomość CAN się zaktualizuje (tylko sub
 }
 ```
 
-### 5. Transmit CAN (klient → serwer) *(tylko Linux/aarch64 + socketcan)*
+### 5. Surowe ramki CAN (Raw frames)
+
+Niezależnie od głównego protokołu (`subscribe`/`snapshot`/`update`, opartego o zdekodowane wiadomości DBC), serwer może udostępniać również surowy strumień **wszystkich** ramek CAN z magistrali - łącznie z tymi, dla których nie ma definicji w pliku DBC.
+
+Ta funkcja jest wyłączona domyślnie i kontrolowana flagą `broadcast_raw_frames` w `config.txt` (patrz README).
+
+#### 5a. Subskrypcja raw (klient → serwer)
+
+```json
+{"type":"subscribe_raw"}
+```
+
+Zapisuje klienta do surowego strumienia. Serwer natychmiast odpowie:
+1. Jedną wiadomością `raw_snapshot` z ostatnią znaną ramką dla każdego widzianego dotąd identyfikatora
+2. Potem ciągłym strumieniem `raw_update` dla każdej nowej ramki na magistrali
+
+Jeśli `broadcast_raw_frames=false` w konfiguracji, wiadomość jest no-opem - serwer nic nie wysyła.
+
+#### 5b. Rezygnacja z subskrypcji raw (klient → serwer)
+
+```json
+{"type":"unsubscribe_raw"}
+```
+
+#### 5c. Raw snapshot (serwer → klient)
+
+Wysyłany raz po otrzymaniu `subscribe_raw`:
+
+```json
+{
+  "type": "raw_snapshot",
+  "frames": [
+    { "message_id": 291, "is_extended": false, "data": [1, 2, 3, 4], "timestamp": "2026-01-12T14:23:45.123456789+01:00" }
+  ]
+}
+```
+
+#### 5d. Raw update (serwer → klient)
+
+Wysyłany za każdym razem, gdy na magistrali pojawi się nowa ramka CAN (surowa, przed dekodowaniem DBC):
+
+```json
+{
+  "type": "raw_update",
+  "message_id": 291,
+  "is_extended": false,
+  "data": [1, 2, 3, 4],
+  "timestamp": "2026-01-12T14:23:46.123456789+01:00"
+}
+```
+
+Uwagi:
+- `message_id` - surowy identyfikator arbitrażu CAN (bez dekodowania DBC); ramki, dla których nie ma definicji w DBC, są również uwzględniane (pełny ruch na magistrali).
+- `is_extended` - rozróżnia identyfikator standard (11-bit, `false`) od extended (29-bit, `true`).
+- `data` - lista wartości bajtów, `0..8` elementów.
+- Strumień raw jest "wszystko albo nic" - nie ma filtrowania po pojedynczym `message_id`, tak jak w przypadku `subscribe`/`message_names`.
+- Cały flow raw jest za flagą konfiguracyjną `broadcast_raw_frames` (domyślnie `false`) - gdy jest wyłączona, serwer nie wysyła żadnych wiadomości raw.
+
+### 6. Transmit CAN (klient → serwer) *(tylko Linux/aarch64 + socketcan)*
 
 W trybie `socketcan` klient może wysłać żądanie nadania ramki CAN.
 Ta wiadomość nie używa DBC – serwer tylko przyjmuje `message_id` i `data` i wysyła ramkę na magistralę.

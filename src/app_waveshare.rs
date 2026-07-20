@@ -5,12 +5,13 @@ use std::time::Duration;
 use color_eyre::eyre::{Result, eyre};
 use time::OffsetDateTime;
 use embedded_can::blocking::Can;
+use embedded_can::Frame;
 use waveshare_usb_can_a::sync::Usb2Can;
 use waveshare_usb_can_a::{self as ws};
 use crate::setup::config;
 
-use crate::integration::dbc_handler::DbcHandler;
-use crate::websocket::{CanUpdate, SignalData};
+use crate::integration::dbc_handler::{unpack_id, DbcHandler};
+use crate::websocket::{CanUpdate, RawFrame, SignalData};
 use tokio::sync::mpsc;
 
 #[cfg(target_os = "windows")]
@@ -20,6 +21,7 @@ pub struct App {
     dbc_handler: DbcHandler,
     device: Usb2Can,
     ws_tx: Option<mpsc::UnboundedSender<CanUpdate>>,
+    raw_tx: Option<mpsc::UnboundedSender<RawFrame>>,
 }
 
 impl App {
@@ -51,6 +53,7 @@ impl App {
             dbc_handler,
             device,
             ws_tx: None,
+            raw_tx: None,
         })
     }
 
@@ -59,15 +62,31 @@ impl App {
         self.ws_tx = Some(tx);
     }
 
+    /// Sets the sender for raw frame broadcasts
+    pub fn set_raw_sender(&mut self, tx: mpsc::UnboundedSender<RawFrame>) {
+        self.raw_tx = Some(tx);
+    }
+
     pub fn run(&mut self) -> Result<()> {
         info!("Starting to receive CAN frames... (Press Ctrl+C to stop)");
         loop {
             match self.device.receive() {
                 Ok(frame) => {
+                    let timestamp = OffsetDateTime::now_local()?;
+
+                    // Raw path: capture the frame before decode() consumes it.
+                    if let Some(ref raw_tx) = self.raw_tx {
+                        let (message_id, is_extended) = unpack_id(&frame.id());
+                        let _ = raw_tx.send(RawFrame {
+                            message_id,
+                            is_extended,
+                            data: frame.data().to_vec(),
+                            timestamp,
+                        });
+                    }
+
                     match self.dbc_handler.decode(frame) {
                         Ok((msg_name, signals)) => {
-                            let timestamp = OffsetDateTime::now_local()?;
-                            
                             // Send update to WebSocket if connected
                             if let Some(ref tx) = self.ws_tx {
                                 let update = CanUpdate {
