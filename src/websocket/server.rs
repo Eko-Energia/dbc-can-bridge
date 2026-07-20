@@ -8,46 +8,61 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 
-use super::types::{CanUpdate, ClientMessage, MapEntryDto, ServerMessage, SignalValueDto};
+use super::types::{CanUpdate, ClientMessage, MapEntryDto, RawFrame, ServerMessage, SignalValueDto};
+use super::types::RawFrameDto;
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 use super::types::CanTransmitRequest;
+use crate::setup::config;
 
 type ClientId = usize;
 
 struct ClientState {
     tx: mpsc::UnboundedSender<Message>,
-    subscriptions: Option<HashSet<String>>, // None = wszystko, Some = wybrane
+    subscriptions: Option<HashSet<String>>, // None = everything, Some = selected
+    raw: bool,                              // opted into the raw frame stream
 }
 
 pub struct WebSocketServer {
     update_rx: mpsc::UnboundedReceiver<CanUpdate>,
     update_tx: mpsc::UnboundedSender<CanUpdate>,
+    raw_update_rx: mpsc::UnboundedReceiver<RawFrame>,
+    raw_update_tx: mpsc::UnboundedSender<RawFrame>,
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     can_tx: Option<mpsc::UnboundedSender<CanTransmitRequest>>,
     clients: Arc<RwLock<HashMap<ClientId, ClientState>>>,
     next_client_id: Arc<RwLock<ClientId>>,
-    // Cache ostatnich stanów dla snapshot
+    // Cache of latest states for snapshot
     cache: Arc<RwLock<HashMap<String, CanUpdate>>>,
+    raw_cache: Arc<RwLock<HashMap<u32, RawFrame>>>,
 }
 
 impl WebSocketServer {
     pub fn new() -> Self {
         let (update_tx, update_rx) = mpsc::unbounded_channel();
-        
+        let (raw_update_tx, raw_update_rx) = mpsc::unbounded_channel();
+
         Self {
             update_rx,
             update_tx,
+            raw_update_rx,
+            raw_update_tx,
             #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
             can_tx: None,
             clients: Arc::new(RwLock::new(HashMap::new())),
             next_client_id: Arc::new(RwLock::new(0)),
             cache: Arc::new(RwLock::new(HashMap::new())),
+            raw_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Returns sender for sending CAN updates
     pub fn get_update_sender(&self) -> mpsc::UnboundedSender<CanUpdate> {
         self.update_tx.clone()
+    }
+
+    /// Returns sender for pushing raw CAN frames
+    pub fn get_raw_update_sender(&self) -> mpsc::UnboundedSender<RawFrame> {
+        self.raw_update_tx.clone()
     }
 
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
@@ -60,7 +75,9 @@ impl WebSocketServer {
         let listener = TcpListener::bind(addr).await?;
         info!("WebSocket server listening on {}", addr);
 
-        // Task obsługujący aktualizacje CAN i rozsyłanie do klientów
+        let raw_enabled = config::get_broadcast_raw_frames()?;
+
+        // Task handling CAN updates and broadcasting to clients
         let clients = self.clients.clone();
         let cache = self.cache.clone();
         tokio::spawn(async move {
@@ -110,10 +127,25 @@ impl WebSocketServer {
             }
         });
 
+        // Task handling raw frames: update cache and broadcast to raw subscribers.
+        if raw_enabled {
+            let clients = self.clients.clone();
+            let raw_cache = self.raw_cache.clone();
+            tokio::spawn(async move {
+                while let Some(frame) = self.raw_update_rx.recv().await {
+                    // Broadcast from a borrow, then move the frame into the cache (no clone).
+                    broadcast_raw(&clients, &frame).await;
+                    let key = raw_cache_key(&frame);
+                    raw_cache.write().await.insert(key, frame);
+                }
+            });
+        }
+
         // Accept new connections
         let clients = self.clients.clone();
         let next_client_id = self.next_client_id.clone();
         let cache = self.cache.clone();
+        let raw_cache = self.raw_cache.clone();
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
         let can_tx = self.can_tx.clone();
 
@@ -134,6 +166,8 @@ impl WebSocketServer {
                         client_id,
                         clients.clone(),
                         cache.clone(),
+                        raw_cache.clone(),
+                        raw_enabled,
                         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
                         can_tx.clone(),
                     ));
@@ -151,6 +185,8 @@ async fn handle_connection(
     client_id: ClientId,
     clients: Arc<RwLock<HashMap<ClientId, ClientState>>>,
     cache: Arc<RwLock<HashMap<String, CanUpdate>>>,
+    raw_cache: Arc<RwLock<HashMap<u32, RawFrame>>>,
+    raw_enabled: bool,
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     can_tx: Option<mpsc::UnboundedSender<CanTransmitRequest>>,
 ) {
@@ -175,6 +211,7 @@ async fn handle_connection(
             ClientState {
                 tx: tx.clone(),
                 subscriptions: None,
+                raw: false,
             },
         );
     }
@@ -213,6 +250,29 @@ async fn handle_connection(
 
                             // Send snapshot from cache for subscribed messages
                             send_snapshot(&tx, &cache, subscriptions.as_ref()).await;
+                        }
+
+                        ClientMessage::SubscribeRaw => {
+                            if !raw_enabled {
+                                warn!("Client {} requested raw stream, but broadcast_raw_frames is disabled", client_id);
+                            } else {
+                                info!("Client {} subscribing to raw frames", client_id);
+                                {
+                                    let mut clients_guard = clients.write().await;
+                                    if let Some(client) = clients_guard.get_mut(&client_id) {
+                                        client.raw = true;
+                                    }
+                                }
+                                send_raw_snapshot(&tx, &raw_cache).await;
+                            }
+                        }
+
+                        ClientMessage::UnsubscribeRaw => {
+                            info!("Client {} unsubscribing from raw frames", client_id);
+                            let mut clients_guard = clients.write().await;
+                            if let Some(client) = clients_guard.get_mut(&client_id) {
+                                client.raw = false;
+                            }
                         }
 
                         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
@@ -307,5 +367,129 @@ async fn send_snapshot(
     if let Ok(json) = serde_json::to_string(&snapshot) {
         let _ = tx.send(Message::Text(json.into()));
         info!("Sent snapshot with {} entries", entries.len());
+    }
+}
+
+/// Computes the raw-cache key for a frame. Extended frames set bit 31 so a
+/// standard and an extended frame that share the same arbitration id do not
+/// collide in the cache. Mirrors the encoding of `id_to_u32`.
+fn raw_cache_key(frame: &RawFrame) -> u32 {
+    if frame.is_extended {
+        frame.message_id | (1 << 31)
+    } else {
+        frame.message_id
+    }
+}
+
+/// Serializes a single raw frame update once and sends it to every client that
+/// opted into the raw stream. The frame is borrowed, not cloned.
+async fn broadcast_raw(
+    clients: &Arc<RwLock<HashMap<ClientId, ClientState>>>,
+    frame: &RawFrame,
+) {
+    let dto = RawFrameDto {
+        message_id: frame.message_id,
+        is_extended: frame.is_extended,
+        data: &frame.data,
+        timestamp: frame.timestamp,
+    };
+
+    let json = match serde_json::to_string(&ServerMessage::RawUpdate(dto)) {
+        Ok(json) => json,
+        Err(_) => return,
+    };
+    let msg = Message::Text(json.into());
+
+    let clients_guard = clients.read().await;
+    for client in clients_guard.values() {
+        if client.raw {
+            let _ = client.tx.send(msg.clone());
+        }
+    }
+}
+
+/// Sends the current raw-frame snapshot from the cache to a single client.
+async fn send_raw_snapshot(
+    tx: &mpsc::UnboundedSender<Message>,
+    raw_cache: &Arc<RwLock<HashMap<u32, RawFrame>>>,
+) {
+    let cache_guard = raw_cache.read().await;
+
+    let frames: Vec<RawFrameDto> = cache_guard
+        .values()
+        .map(|f| RawFrameDto {
+            message_id: f.message_id,
+            is_extended: f.is_extended,
+            data: &f.data,
+            timestamp: f.timestamp,
+        })
+        .collect();
+
+    let snapshot = ServerMessage::RawSnapshot { frames };
+
+    if let Ok(json) = serde_json::to_string(&snapshot) {
+        let _ = tx.send(Message::Text(json.into()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::OffsetDateTime;
+
+    fn sample_frame() -> RawFrame {
+        RawFrame {
+            message_id: 291,
+            is_extended: false,
+            data: vec![1, 2, 3],
+            timestamp: OffsetDateTime::from_unix_timestamp(0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn raw_cache_key_sets_bit31_for_extended_only() {
+        let mut f = sample_frame();
+        f.message_id = 0x123;
+        f.is_extended = false;
+        assert_eq!(raw_cache_key(&f), 0x123);
+        f.is_extended = true;
+        assert_eq!(raw_cache_key(&f), 0x123 | (1 << 31));
+    }
+
+    #[tokio::test]
+    async fn send_raw_snapshot_emits_cached_frames() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let cache: Arc<RwLock<HashMap<u32, RawFrame>>> = Arc::new(RwLock::new(HashMap::new()));
+        cache.write().await.insert(291, sample_frame());
+
+        send_raw_snapshot(&tx, &cache).await;
+
+        let msg = rx.recv().await.unwrap();
+        if let Message::Text(text) = msg {
+            assert!(text.contains("\"type\":\"raw_snapshot\""));
+            assert!(text.contains("\"message_id\":291"));
+            assert!(text.contains("\"data\":[1,2,3]"));
+        } else {
+            panic!("expected text message");
+        }
+    }
+
+    #[tokio::test]
+    async fn broadcast_raw_only_reaches_subscribed_clients() {
+        let clients: Arc<RwLock<HashMap<ClientId, ClientState>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        let (tx_on, mut rx_on) = mpsc::unbounded_channel();
+        let (tx_off, mut rx_off) = mpsc::unbounded_channel();
+        {
+            let mut g = clients.write().await;
+            g.insert(1, ClientState { tx: tx_on, subscriptions: None, raw: true });
+            g.insert(2, ClientState { tx: tx_off, subscriptions: None, raw: false });
+        }
+
+        broadcast_raw(&clients, &sample_frame()).await;
+
+        let msg = rx_on.recv().await.unwrap();
+        assert!(matches!(msg, Message::Text(_)));
+        assert!(rx_off.try_recv().is_err());
     }
 }

@@ -229,3 +229,6 @@ marimo/_lsp/
 __marimo__/
 
 .DS_Store
+
+# Superpowers design docs / specs (local only)
+docs/superpowers/

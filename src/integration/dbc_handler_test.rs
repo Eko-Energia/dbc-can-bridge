@@ -691,7 +691,7 @@ BO_ 100 TestMessage: 8 Vector__XXX
         .enumerate()
         .map(|(i, msg)| (msg.id.raw(), i))
         .collect();
-    
+
     let handler = DbcHandler {
         dbc,
         message_index_by_id: map
@@ -699,7 +699,7 @@ BO_ 100 TestMessage: 8 Vector__XXX
 
     // Create a frame with 32-bit value 0x12345678 in big-endian
     let frame = Frame::new(
-        Id::Standard(embedded_can::StandardId::new(100).unwrap()), 
+        Id::Standard(embedded_can::StandardId::new(100).unwrap()),
         &[0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x00]
     ).unwrap();
 
@@ -708,4 +708,16 @@ BO_ 100 TestMessage: 8 Vector__XXX
     let (_, signals) = result.unwrap();
     assert_eq!(signals.len(), 1);
     assert_eq!(signals[0].value, 0x12345678 as f64); // 305419896 in decimal
+}
+
+#[test]
+fn unpack_id_standard_returns_raw_and_false() {
+    let id = Id::Standard(embedded_can::StandardId::new(0x123).unwrap());
+    assert_eq!(unpack_id(&id), (0x123, false));
+}
+
+#[test]
+fn unpack_id_extended_returns_raw_and_true() {
+    let id = Id::Extended(embedded_can::ExtendedId::new(0x1ABCD).unwrap());
+    assert_eq!(unpack_id(&id), (0x1ABCD, true));
 }

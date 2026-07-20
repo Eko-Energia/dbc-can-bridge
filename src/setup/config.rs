@@ -15,6 +15,7 @@ const CONFIG_FILE_NAME: &str = "config.txt";
 pub struct Config {
     pub device_port: String,
     pub save_logs: bool,
+    pub broadcast_raw_frames: bool,
     #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
     pub can_baud_rate: CanBaudRate,
 }
@@ -24,6 +25,7 @@ impl Default for Config {
         Self {
             device_port: get_default_device_port(),
             save_logs: true,
+            broadcast_raw_frames: false,
             #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
             can_baud_rate: CanBaudRate::R500kBd,
         }
@@ -71,7 +73,17 @@ impl Config {
                             _ => {
                                 println!("Unknown `save_logs` value, defaulting to true...");
                                 true
-                            }                            
+                            }
+                        }
+                    }
+                    "broadcast_raw_frames" => {
+                        config.broadcast_raw_frames = match value {
+                            "true" => true,
+                            "false" => false,
+                            _ => {
+                                println!("Unknown `broadcast_raw_frames` value, defaulting to false...");
+                                false
+                            }
                         }
                     }
                     #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
@@ -96,11 +108,14 @@ impl Config {
              # Path to CAN device\n\
              device_port={}\n\
              save_logs={}\n\
+             # Broadcast raw CAN frames over WebSocket (true/false)\n\
+             broadcast_raw_frames={}\n\
              \n\
              # CAN transmission speed (5k, 10k, 20k, 50k, 100k, 125k, 200k, 250k, 400k, 500k, 800k, 1000k)\n\
              can_baud_rate={}\n",
             self.device_port,
             self.save_logs,
+            self.broadcast_raw_frames,
             format_can_baud_rate(self.can_baud_rate)
         );
 
@@ -109,9 +124,12 @@ impl Config {
             "# CAN Receiver Configuration\n\
              # Path to CAN device\n\
              device_port={}\n\
-             save_logs={}\n",
+             save_logs={}\n\
+             # Broadcast raw CAN frames over WebSocket (true/false)\n\
+             broadcast_raw_frames={}\n",
             self.device_port,
-            self.save_logs
+            self.save_logs,
+            self.broadcast_raw_frames
         );
 
         let mut file = fs::File::create(path)?;
@@ -222,8 +240,18 @@ pub fn get_save_logs() -> Result<bool> {
         .ok_or_else(|| eyre!("Configuration not initialized. Call init_config() first."))?
         .lock()
         .map_err(|_| eyre!("Configuration access error"))?;
-    
+
     Ok(config.save_logs)
+}
+
+/// Returns whether raw CAN frames should be broadcast over WebSocket
+pub fn get_broadcast_raw_frames() -> Result<bool> {
+    let config = CONFIG.get()
+        .ok_or_else(|| eyre!("Configuration not initialized. Call init_config() first."))?
+        .lock()
+        .map_err(|_| eyre!("Configuration access error"))?;
+
+    Ok(config.broadcast_raw_frames)
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
@@ -233,6 +261,39 @@ pub fn get_can_baud_rate() -> Result<CanBaudRate> {
         .ok_or_else(|| eyre!("Configuration not initialized. Call init_config() first."))?
         .lock()
         .map_err(|_| eyre!("Configuration access error"))?;
-    
+
     Ok(config.can_baud_rate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_temp(contents: &str, name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("dbc-bridge-test-{}-config.txt", name));
+        fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn broadcast_raw_frames_defaults_to_false() {
+        let path = write_temp("device_port=can0\n", "default");
+        let config = Config::load_from_file(&path).unwrap();
+        assert!(!config.broadcast_raw_frames);
+    }
+
+    #[test]
+    fn broadcast_raw_frames_parses_true() {
+        let path = write_temp("broadcast_raw_frames=true\n", "true");
+        let config = Config::load_from_file(&path).unwrap();
+        assert!(config.broadcast_raw_frames);
+    }
+
+    #[test]
+    fn broadcast_raw_frames_parses_false() {
+        let path = write_temp("broadcast_raw_frames=false\n", "false");
+        let config = Config::load_from_file(&path).unwrap();
+        assert!(!config.broadcast_raw_frames);
+    }
 }

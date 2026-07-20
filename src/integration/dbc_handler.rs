@@ -95,6 +95,16 @@ pub(crate) fn id_to_u32(id: &Id) -> u32 {
     }
 }
 
+/// Splits a CAN identifier into its raw arbitration id and whether it is an
+/// extended (29-bit) frame. Unlike `id_to_u32`, this does NOT encode the
+/// extended flag into the value - the flag is returned separately.
+pub(crate) fn unpack_id(id: &Id) -> (u32, bool) {
+    match id {
+        Id::Standard(s) => (s.as_raw() as u32, false),
+        Id::Extended(e) => (e.as_raw(), true),
+    }
+}
+
 // inspired by: https://github.com/PurdueElectricRacing/can_decode/
 /// Decodes a single signal from raw CAN data.
 /// Extracts the raw bits for a signal, converts to signed/unsigned as needed
