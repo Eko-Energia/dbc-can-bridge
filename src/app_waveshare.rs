@@ -102,7 +102,8 @@ impl App {
                                     timestamp,
                                 };
                                 
-                                // Send without blocking - skip if channel is full
+                                // Non-blocking send; the channel is unbounded, so this
+                                // only fails once the receiver has been dropped.
                                 let _ = tx.send(update);
                             }
                         }

@@ -68,6 +68,8 @@ impl App {
         let ws_tx = self.ws_tx.clone();
         let raw_tx = self.raw_tx.clone();
 
+        // Frames we transmit are echoed back by the kernel and picked up here,
+        // so this is the only place that publishes to the WebSocket streams.
         let rx_task: tokio::task::JoinHandle<Result<()>> = tokio::spawn(async move {
             loop {
                 match read_socket.read_frame().await {
@@ -120,22 +122,33 @@ impl App {
         if let Some(mut rx) = self.ws_rx.take() {
             let tx_task: tokio::task::JoinHandle<Result<()>> = tokio::spawn(async move {
                 while let Some(request) = rx.recv().await {
-                    let frame = build_frame_from_request(&request)?;
-                    write_socket
-                        .write_frame(frame)
-                        .await
-                        .map_err(|e| eyre!("SocketCAN write error: {}", e))?;
+                    let frame = match build_frame_from_request(&request) {
+                        Ok(frame) => frame,
+                        Err(e) => {
+                            warn!("Ignoring invalid transmit request: {}", e);
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = write_socket.write_frame(frame).await {
+                        error!("SocketCAN write error: {}", e);
+                        continue;
+                    }
                 }
                 Ok(())
             });
 
             let (rx_result, tx_result) = tokio::join!(rx_task, tx_task);
 
-            if let Err(e) = rx_result {
-                return Err(eyre!("Receiver task failed: {}", e));
+            match rx_result {
+                Err(e) => return Err(eyre!("Receiver task failed: {}", e)),
+                Ok(Err(e)) => return Err(e),
+                Ok(Ok(())) => {}
             }
-            if let Err(e) = tx_result {
-                return Err(eyre!("Transmitter task failed: {}", e));
+            match tx_result {
+                Err(e) => return Err(eyre!("Transmitter task failed: {}", e)),
+                Ok(Err(e)) => return Err(e),
+                Ok(Ok(())) => {}
             }
 
             return Ok(());
