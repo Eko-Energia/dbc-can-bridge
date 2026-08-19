@@ -11,6 +11,9 @@ use crate::integration::dbc_handler::{unpack_id, DbcHandler};
 use crate::setup::config;
 use crate::websocket::{CanTransmitRequest, CanUpdate, RawFrame, SignalData};
 
+/// Returned by a SocketCAN `write()` when the interface transmit queue is full.
+const ENOBUFS: i32 = 105;
+
 pub struct App {
     dbc_handler: Arc<DbcHandler>,
     interface_name: String,
@@ -131,27 +134,38 @@ impl App {
                     };
 
                     if let Err(e) = write_socket.write_frame(frame).await {
-                        error!("SocketCAN write error: {}", e);
-                        continue;
+                        // A full transmit queue is back-pressure, not a broken link:
+                        // a client sending faster than the bus drains is enough to
+                        // hit it, so it must not be able to take the app down.
+                        if e.raw_os_error() == Some(ENOBUFS) {
+                            warn!("SocketCAN transmit queue full, frame dropped: {}", e);
+                            continue;
+                        }
+
+                        return Err(eyre!("SocketCAN write error: {}", e));
                     }
                 }
-                Ok(())
+
+                // The loop only ends once every CanTransmitRequest sender is gone.
+                // Clients disconnecting does not do that, because the WebSocket
+                // server holds its own sender for its whole lifetime, so this means
+                // the server itself died.
+                Err(eyre!("CAN transmit channel closed: WebSocket server is gone"))
             });
 
-            let (rx_result, tx_result) = tokio::join!(rx_task, tx_task);
-
-            match rx_result {
-                Err(e) => return Err(eyre!("Receiver task failed: {}", e)),
-                Ok(Err(e)) => return Err(e),
-                Ok(Ok(())) => {}
-            }
-            match tx_result {
-                Err(e) => return Err(eyre!("Transmitter task failed: {}", e)),
-                Ok(Err(e)) => return Err(e),
-                Ok(Ok(())) => {}
-            }
-
-            return Ok(());
+            // Neither task ends on its own, so the first one to finish decides the
+            // outcome. The other is cancelled when the runtime is dropped, which is
+            // why we must not wait for it here.
+            return tokio::select! {
+                res = rx_task => match res {
+                    Ok(result) => result,
+                    Err(e) => Err(eyre!("Receiver task join error: {}", e)),
+                },
+                res = tx_task => match res {
+                    Ok(result) => result,
+                    Err(e) => Err(eyre!("Transmitter task join error: {}", e)),
+                },
+            };
         }
 
         match rx_task.await {
