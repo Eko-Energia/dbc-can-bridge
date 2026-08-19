@@ -25,7 +25,7 @@ impl Default for Config {
         Self {
             device_port: get_default_device_port(),
             save_logs: true,
-            broadcast_raw_frames: false,
+            broadcast_raw_frames: true,
             #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
             can_baud_rate: CanBaudRate::R500kBd,
         }
