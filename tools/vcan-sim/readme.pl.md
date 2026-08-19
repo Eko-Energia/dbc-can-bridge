@@ -13,21 +13,18 @@ Działa tylko na Linuksie!
 
 ### 1. Instalacja zależności
 
+Projekt korzysta z [uv](https://docs.astral.sh/uv/) - zależności i przypięta wersja Pythona pochodzą z `pyproject.toml` / `uv.lock`:
+
 ```bash
-# Utwórz środowisko wirtualne Python
-python3 -m venv .venv
-
-# Aktywuj środowisko
-source .venv/bin/activate
-
-# Zainstaluj zależności
-pip install -r requirements.txt
+# Utwórz .venv i zainstaluj zależności
+uv sync
 ```
 
 **Uwaga:** Pamiętaj aby zawsze aktywować środowisko przed uruchomieniem symulatorów:
 ```bash
 source .venv/bin/activate
 ```
+Alternatywnie uruchamiaj każde polecenie przez `uv run`, np. `uv run python simulator_serial.py`.
 
 ## Użycie
 
@@ -51,7 +48,7 @@ Po uruchomieniu symulator wyświetli ścieżkę do wirtualnego portu oraz stał�
 
 #### Konfiguracja can-receiver
 
-Edytuj `can-receiver/config.txt` i ustaw stałą ścieżkę:
+Edytuj plik `config.txt` tworzony obok pliku wykonywalnego (przy `cargo run` to `target/debug/config.txt`) i ustaw stałą ścieżkę:
 ```
 device_port=/tmp/perla-bus-tty
 can_baud_rate=500k
@@ -59,7 +56,7 @@ can_baud_rate=500k
 
 Następnie uruchom can-receiver:
 ```bash
-cd ../can-receiver
+cd ../..
 cargo run
 ```
 
@@ -67,8 +64,6 @@ cargo run
 
 ```bash
 # Użyj własnego pliku DBC
-./run_simulator.sh --dbc moj_plik.dbc
-# lub
 python simulator_serial.py --dbc moj_plik.dbc
 
 # Symuluj przez określony czas (30 sekund)
@@ -136,7 +131,7 @@ Symulator może być użyty do testowania aplikacji `can-receiver`:
 python simulator_serial.py
 
 # Terminal 2: Uruchom can-receiver (po skompilowaniu)
-cd ../can-receiver
+cd ../..
 cargo run
 ```
 

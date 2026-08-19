@@ -71,7 +71,7 @@ The `config.txt` file (created on first run, see step 3 above) supports the foll
 - `device_port` - path to the CAN device
 - `save_logs` - `true`/`false`, default `true` - save logs to a file
 - `can_baud_rate` - CAN bus speed (Waveshare only), default `500k`
-- `broadcast_raw_frames` - `true`/`false`, default `false` - broadcast raw CAN frames over WebSocket, see [WEBSOCKET_API.md](WEBSOCKET_API.md)
+- `broadcast_raw_frames` - `true`/`false`, default `true` - broadcast raw CAN frames over WebSocket, see [WEBSOCKET_API.md](WEBSOCKET_API.md)
 
 ## Running on ARM64 (with socketcan)
 
@@ -117,9 +117,11 @@ The program automatically starts a WebSocket server at `ws://0.0.0.0:8080`, prov
 
 ### Quick start
 
-1. Open `websocket-test-client.html` in your browser
+1. Open `tools/websocket-test-client.html` in your browser
 2. Click "Connect" - it will connect automatically and fetch all data
 3. Observe real-time CAN updates
+
+For the raw CAN frame stream (`broadcast_raw_frames`, enabled by default) use `tools/raw-frames-test-client.html` instead.
 
 ### Capabilities
 
@@ -154,7 +156,8 @@ cargo zigbuild --target aarch64-unknown-linux-gnu --release
 ## Documentation
 
 - **WebSocket API**: [WEBSOCKET_API.md](WEBSOCKET_API.md)
-- **CAN Simulator**: [vcan-sim/readme.md](vcan-sim/readme.md)
+- **CAN Simulator**: [tools/vcan-sim/readme.md](tools/vcan-sim/readme.md)
+- **WebSocket test clients**: [tools/websocket-test-client.html](tools/websocket-test-client.html) (decoded messages), [tools/raw-frames-test-client.html](tools/raw-frames-test-client.html) (raw frames)
 
 ---
 

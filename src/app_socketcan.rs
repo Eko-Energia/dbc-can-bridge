@@ -11,6 +11,9 @@ use crate::integration::dbc_handler::{unpack_id, DbcHandler};
 use crate::setup::config;
 use crate::websocket::{CanTransmitRequest, CanUpdate, RawFrame, SignalData};
 
+/// Returned by a SocketCAN `write()` when the interface transmit queue is full.
+const ENOBUFS: i32 = 105;
+
 pub struct App {
     dbc_handler: Arc<DbcHandler>,
     interface_name: String,
@@ -68,6 +71,8 @@ impl App {
         let ws_tx = self.ws_tx.clone();
         let raw_tx = self.raw_tx.clone();
 
+        // Frames we transmit are echoed back by the kernel and picked up here,
+        // so this is the only place that publishes to the WebSocket streams.
         let rx_task: tokio::task::JoinHandle<Result<()>> = tokio::spawn(async move {
             loop {
                 match read_socket.read_frame().await {
@@ -120,25 +125,47 @@ impl App {
         if let Some(mut rx) = self.ws_rx.take() {
             let tx_task: tokio::task::JoinHandle<Result<()>> = tokio::spawn(async move {
                 while let Some(request) = rx.recv().await {
-                    let frame = build_frame_from_request(&request)?;
-                    write_socket
-                        .write_frame(frame)
-                        .await
-                        .map_err(|e| eyre!("SocketCAN write error: {}", e))?;
+                    let frame = match build_frame_from_request(&request) {
+                        Ok(frame) => frame,
+                        Err(e) => {
+                            warn!("Ignoring invalid transmit request: {}", e);
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = write_socket.write_frame(frame).await {
+                        // A full transmit queue is back-pressure, not a broken link:
+                        // a client sending faster than the bus drains is enough to
+                        // hit it, so it must not be able to take the app down.
+                        if e.raw_os_error() == Some(ENOBUFS) {
+                            warn!("SocketCAN transmit queue full, frame dropped: {}", e);
+                            continue;
+                        }
+
+                        return Err(eyre!("SocketCAN write error: {}", e));
+                    }
                 }
-                Ok(())
+
+                // The loop only ends once every CanTransmitRequest sender is gone.
+                // Clients disconnecting does not do that, because the WebSocket
+                // server holds its own sender for its whole lifetime, so this means
+                // the server itself died.
+                Err(eyre!("CAN transmit channel closed: WebSocket server is gone"))
             });
 
-            let (rx_result, tx_result) = tokio::join!(rx_task, tx_task);
-
-            if let Err(e) = rx_result {
-                return Err(eyre!("Receiver task failed: {}", e));
-            }
-            if let Err(e) = tx_result {
-                return Err(eyre!("Transmitter task failed: {}", e));
-            }
-
-            return Ok(());
+            // Neither task ends on its own, so the first one to finish decides the
+            // outcome. The other is cancelled when the runtime is dropped, which is
+            // why we must not wait for it here.
+            return tokio::select! {
+                res = rx_task => match res {
+                    Ok(result) => result,
+                    Err(e) => Err(eyre!("Receiver task join error: {}", e)),
+                },
+                res = tx_task => match res {
+                    Ok(result) => result,
+                    Err(e) => Err(eyre!("Transmitter task join error: {}", e)),
+                },
+            };
         }
 
         match rx_task.await {

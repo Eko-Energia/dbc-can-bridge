@@ -71,7 +71,7 @@ Plik `config.txt` (tworzony przy pierwszym uruchomieniu, patrz krok 3 powyżej) 
 - `device_port` - ścieżka do urządzenia CAN
 - `save_logs` - `true`/`false`, domyślnie `true` - zapisywanie logów do pliku
 - `can_baud_rate` - prędkość magistrali CAN (tylko Waveshare), domyślnie `500k`
-- `broadcast_raw_frames` - `true`/`false`, domyślnie `false` - przesyłanie surowych ramek CAN przez WebSocket, patrz [WEBSOCKET_API.md](WEBSOCKET_API.md)
+- `broadcast_raw_frames` - `true`/`false`, domyślnie `true` - przesyłanie surowych ramek CAN przez WebSocket, patrz [WEBSOCKET_API.md](WEBSOCKET_API.md)
 
 ## Uruchomienie na arm64 (z socketcan)
 
@@ -117,9 +117,11 @@ Program automatycznie uruchamia serwer WebSocket na `ws://0.0.0.0:8080`, który 
 
 ### Szybki start
 
-1. Otwórz plik `websocket-test-client.html` w przeglądarce
+1. Otwórz plik `tools/websocket-test-client.html` w przeglądarce
 2. Kliknij "Connect" - automatycznie połączy się i pobierze wszystkie dane
 3. Obserwuj dane CAN w czasie rzeczywistym
+
+Do podglądu surowego strumienia ramek CAN (`broadcast_raw_frames`, domyślnie włączone) użyj `tools/raw-frames-test-client.html`.
 
 ### Możliwości
 
@@ -154,7 +156,8 @@ cargo zigbuild --target aarch64-unknown-linux-gnu --release
 ## Dokumentacja
 
 - **WebSocket API**: [WEBSOCKET_API.md](WEBSOCKET_API.md)
-- **CAN Simulator**: [vcan-sim/readme.md](vcan-sim/readme.md)
+- **CAN Simulator**: [tools/vcan-sim/readme.md](tools/vcan-sim/readme.md)
+- **Klienci testowi WebSocket**: [tools/websocket-test-client.html](tools/websocket-test-client.html) (zdekodowane wiadomości), [tools/raw-frames-test-client.html](tools/raw-frames-test-client.html) (surowe ramki)
 
 ---
 

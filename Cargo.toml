@@ -1,6 +1,6 @@
 [package]
 name = "can-receiver"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 authors = []
 license = "MIT"
@@ -24,7 +24,7 @@ waveshare_usb_can_a = { package = "waveshare-usb-can-a", git = "https://github.c
 
 # for arm64 -> use socketcan
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
-socketcan = { version = "3.5.0", features = ["tokio"] }
+socketcan = { version = "3.6.2", features = ["tokio"] }
 
 [profile.dev.package."*"]
 opt-level = 3
