@@ -81,8 +81,8 @@ impl Config {
                             "true" => true,
                             "false" => false,
                             _ => {
-                                println!("Unknown `broadcast_raw_frames` value, defaulting to false...");
-                                false
+                                println!("Unknown `broadcast_raw_frames` value, defaulting to true...");
+                                true
                             }
                         }
                     }
@@ -277,10 +277,10 @@ mod tests {
     }
 
     #[test]
-    fn broadcast_raw_frames_defaults_to_false() {
+    fn broadcast_raw_frames_defaults_to_true() {
         let path = write_temp("device_port=can0\n", "default");
         let config = Config::load_from_file(&path).unwrap();
-        assert!(!config.broadcast_raw_frames);
+        assert!(config.broadcast_raw_frames);
     }
 
     #[test]

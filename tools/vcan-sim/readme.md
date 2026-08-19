@@ -13,21 +13,18 @@ Works only on Linux!
 
 ### 1. Installing Dependencies
 
+The project uses [uv](https://docs.astral.sh/uv/) - dependencies and the pinned Python version come from `pyproject.toml` / `uv.lock`:
+
 ```bash
-# Create Python virtual environment
-python3 -m venv .venv
-
-# Activate environment
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Create .venv and install dependencies
+uv sync
 ```
 
 **Note:** Remember to always activate the environment before running simulators:
 ```bash
 source .venv/bin/activate
 ```
+Alternatively, run every command through `uv run`, for example `uv run python simulator_serial.py`.
 
 ## Usage
 
@@ -51,7 +48,7 @@ After startup, the simulator will display the path to the virtual port and the s
 
 #### Configuring can-receiver
 
-Edit `can-receiver/config.txt` and set the stable path:
+Edit the `config.txt` file created next to the executable (`target/debug/config.txt` when started with `cargo run`) and set the stable path:
 ```
 device_port=/tmp/perla-bus-tty
 can_baud_rate=500k
@@ -59,7 +56,7 @@ can_baud_rate=500k
 
 Then run can-receiver:
 ```bash
-cd ../can-receiver
+cd ../..
 cargo run
 ```
 
@@ -67,8 +64,6 @@ cargo run
 
 ```bash
 # Use your own DBC file
-./run_simulator.sh --dbc my_file.dbc
-# or
 python simulator_serial.py --dbc my_file.dbc
 
 # Simulate for a specific time (30 seconds)
@@ -136,7 +131,7 @@ The simulator can be used to test the `can-receiver` application:
 python simulator_serial.py
 
 # Terminal 2: Run can-receiver (after compiling)
-cd ../can-receiver
+cd ../..
 cargo run
 ```
 
