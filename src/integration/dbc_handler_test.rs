@@ -1,46 +1,9 @@
 use super::*;
-use color_eyre::Result;
 use embedded_can::{Frame as FrameTrait, Id};
 #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
 use waveshare_usb_can_a::Frame;
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 use socketcan::{CanFrame as Frame};
-
-#[test]
-#[ignore] // Requires actual DBC file in exe directory
-fn decode_two_sample_frames() -> Result<()> {
-    // test with the CAN_DB file
-    // to see print in tests:
-    // cargo test -- --show-output
-    let dbc = DbcHandler::new()?;
-    println!("DBC loaded: {} message definitions available\n", dbc.dbc.messages.len());
-
-    let frame = Frame::new(
-        Id::Standard(embedded_can::StandardId::new(130).unwrap()), &[231, 49, 0, 0, 223, 11]).unwrap();
-
-    let (msg_name, signals) = dbc.decode(frame)?;
-    println!("{}:", msg_name);
-    signals.iter().for_each(
-        |s| println!("  {}: {} {}", s.name, s.value, s.unit));
-
-    let frame1 = Frame::new(
-        Id::Standard(embedded_can::StandardId::new(139).unwrap()), &[231, 49, 4, 3, 223, 11, 6]).unwrap();
-
-    let (msg_name, signals) = dbc.decode(frame1)?;
-    println!("{}:", msg_name);
-    signals.iter().for_each(
-        |s| println!("  {}: {} {}", s.name, s.value, s.unit));
-
-    let frame2 = Frame::new(
-        Id::Standard(embedded_can::StandardId::new(128).unwrap()), &[0, 2, 1]).unwrap();
-
-    let (msg_name, signals) = dbc.decode(frame2)?;
-    println!("{}:", msg_name);
-    signals.iter().for_each(
-        |s| println!("  {}: {} {}", s.name, s.value, s.unit));
-
-    Ok(())
-}
 
 // Error case tests
 
@@ -92,16 +55,17 @@ BS_:
 BO_ 100 TestMessage: 8 Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Create frame with empty data
@@ -144,16 +108,17 @@ BS_:
 BO_ 100 TestMessage: 8 Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Create frame with ID 200 which doesn't exist in DBC
@@ -170,7 +135,7 @@ BO_ 100 TestMessage: 8 Vector__XXX
 #[test]
 fn test_decode_signal_value_signed_positive() {
     let data = [0b00001111]; // 15 in binary
-    let result = decode_signal_value(0, 8, ByteOrder::LittleEndian, ValueType::Signed, &data);
+    let result = decode_signal_value(0, 8, ByteOrder::LittleEndian, ValueType::Signed, 1.0, 0.0, &data);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 15.0);
 }
@@ -178,7 +143,7 @@ fn test_decode_signal_value_signed_positive() {
 #[test]
 fn test_decode_signal_value_signed_negative() {
     let data = [0b11111111]; // -1 in 8-bit two's complement
-    let result = decode_signal_value(0, 8, ByteOrder::LittleEndian, ValueType::Signed, &data);
+    let result = decode_signal_value(0, 8, ByteOrder::LittleEndian, ValueType::Signed, 1.0, 0.0, &data);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), -1.0);
 }
@@ -186,7 +151,7 @@ fn test_decode_signal_value_signed_negative() {
 #[test]
 fn test_decode_signal_value_unsigned() {
     let data = [0xFF]; // 255 in unsigned
-    let result = decode_signal_value(0, 8, ByteOrder::LittleEndian, ValueType::Unsigned, &data);
+    let result = decode_signal_value(0, 8, ByteOrder::LittleEndian, ValueType::Unsigned, 1.0, 0.0, &data);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 255.0);
 }
@@ -221,16 +186,17 @@ BO_ 100 TestMessage: 8 Vector__XXX
  SG_ TestSignal : 0|8@1+ (1,0) [0|255] "" Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Create a valid frame
@@ -270,7 +236,7 @@ fn test_extract_signal_value_little_endian_partial_byte() {
 fn test_decode_signal_value_64_bit_signed() {
     // Test the edge case of 64-bit signed value
     let data = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-    let result = decode_signal_value(0, 64, ByteOrder::LittleEndian, ValueType::Signed, &data);
+    let result = decode_signal_value(0, 64, ByteOrder::LittleEndian, ValueType::Signed, 1.0, 0.0, &data);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), -1.0);
 }
@@ -290,12 +256,13 @@ BO_ 100 TestMessage: 8 Vector__XXX
     let dbc = Dbc::try_from(dbc_content).unwrap();
     
     // Create a map with an invalid index
-    let mut map: HashMap<u32, usize> = HashMap::new();
-    map.insert(100, 999); // Index 999 is out of bounds
+    let mut map: HashMap<u32, (usize, bool)> = HashMap::new();
+    map.insert(100, (999, false)); // Index 999 is out of bounds
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Create a valid frame
@@ -331,7 +298,7 @@ fn test_extract_signal_value_big_endian_single_bit() {
 fn test_decode_signal_value_signed_16_bit_negative() {
     // Test 16-bit signed negative value
     let data = [0xFF, 0xFF]; // -1 in 16-bit two's complement
-    let result = decode_signal_value(0, 16, ByteOrder::LittleEndian, ValueType::Signed, &data);
+    let result = decode_signal_value(0, 16, ByteOrder::LittleEndian, ValueType::Signed, 1.0, 0.0, &data);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), -1.0);
 }
@@ -340,7 +307,7 @@ fn test_decode_signal_value_signed_16_bit_negative() {
 fn test_decode_signal_value_signed_16_bit_positive() {
     // Test 16-bit signed positive value (max positive)
     let data = [0xFF, 0x7F]; // 32767 in 16-bit two's complement
-    let result = decode_signal_value(0, 16, ByteOrder::LittleEndian, ValueType::Signed, &data);
+    let result = decode_signal_value(0, 16, ByteOrder::LittleEndian, ValueType::Signed, 1.0, 0.0, &data);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 32767.0);
 }
@@ -396,16 +363,17 @@ BO_ 100 TestMessage: 8 Vector__XXX
  SG_ Signal3 : 16|16@1+ (0.1,0) [0|6553.5] "" Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Create a frame with data for all signals
@@ -438,16 +406,17 @@ BO_ 100 TestMessage: 8 Vector__XXX
  SG_ Temperature : 0|16@1+ (0.1,-40) [-40|615.5] "°C" Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Raw value 400 -> 400 * 0.1 - 40 = 0°C
@@ -479,16 +448,17 @@ BO_ 100 TestMessage: 8 Vector__XXX
  SG_ BigEndianSignal : 7|8@0+ (1,0) [0|255] "" Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Create a frame with data
@@ -520,16 +490,17 @@ BO_ 100 TestMessage: 8 Vector__XXX
  SG_ BigEndian16 : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Create a frame with 16-bit value 0x1234 in big-endian
@@ -559,16 +530,17 @@ BO_ 100 TestMessage: 8 Vector__XXX
  SG_ Speed : 7|16@0+ (0.01,0) [0|655.35] "km/h" Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Raw value 10000 -> 10000 * 0.01 = 100.0 km/h
@@ -602,16 +574,17 @@ BO_ 100 TestMessage: 8 Vector__XXX
  SG_ BigEndianSignal : 15|8@0+ (1,0) [0|255] "" Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Byte 0: 0xAA (little-endian signal)
@@ -646,16 +619,17 @@ BO_ 100 TestMessage: 8 Vector__XXX
  SG_ SignedBigEndian : 7|16@0- (1,0) [-32768|32767] "" Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
     
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Test negative value: -1 in 16-bit two's complement = 0xFFFF
@@ -685,16 +659,17 @@ BO_ 100 TestMessage: 8 Vector__XXX
  SG_ BigEndian32 : 7|32@0+ (1,0) [0|4294967295] "" Vector__XXX
 "#;
     let dbc = Dbc::try_from(dbc_content).unwrap();
-    let map: HashMap<u32, usize> = dbc
+    let map: HashMap<u32, (usize, bool)> = dbc
         .messages
         .iter()
         .enumerate()
-        .map(|(i, msg)| (msg.id.raw(), i))
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
         .collect();
 
     let handler = DbcHandler {
         dbc,
-        message_index_by_id: map
+        message_index_by_id: map,
+        error_map: None
     };
 
     // Create a frame with 32-bit value 0x12345678 in big-endian
@@ -721,3 +696,144 @@ fn unpack_id_extended_returns_raw_and_true() {
     let id = Id::Extended(embedded_can::ExtendedId::new(0x1ABCD).unwrap());
     assert_eq!(unpack_id(&id), (0x1ABCD, true));
 }
+
+// Error frame mapping tests
+
+/// Builds a handler from inline DBC text, deriving the index the same way
+/// `DbcHandler::new` does so the `is_error_frame` flag stays in sync.
+fn handler_with(dbc_content: &str, error_map: Option<HashMap<u32, String>>) -> DbcHandler {
+    let dbc = Dbc::try_from(dbc_content).unwrap();
+    let message_index_by_id = dbc
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
+        .collect();
+
+    DbcHandler { dbc, message_index_by_id, error_map }
+}
+
+fn error_map_of(entries: &[(u32, &str)]) -> Option<HashMap<u32, String>> {
+    Some(entries.iter().map(|(k, v)| (*k, v.to_string())).collect())
+}
+
+const EMCY_DBC: &str = r#"
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BO_ 100 MOTOR_EMCY: 8 Vector__XXX
+ SG_ ErrorCode : 0|16@1+ (1,0) [0|65535] "" Vector__XXX
+ SG_ Voltage : 16|16@1+ (0.1,0) [0|6553.5] "V" Vector__XXX
+"#;
+
+/// 0x8110 error code in the first signal, raw 1000 (=100.0 V) in the second.
+const EMCY_FRAME: [u8; 8] = [0x10, 0x81, 0xE8, 0x03, 0x00, 0x00, 0x00, 0x00];
+
+fn frame_100(data: &[u8]) -> Frame {
+    Frame::new(Id::Standard(embedded_can::StandardId::new(100).unwrap()), data).unwrap()
+}
+
+#[test]
+fn is_error_frame_matches_known_suffixes() {
+    assert!(is_error_frame("MOTOR_EMCY"));
+    assert!(is_error_frame("BMS_NODE"));
+    // suffix must be at the end, not anywhere in the name
+    assert!(!is_error_frame("EMCY_MOTOR"));
+    assert!(!is_error_frame("MOTOR_STATUS"));
+    assert!(!is_error_frame(""));
+}
+
+#[test]
+fn error_frame_maps_code_to_name_in_unit_field() {
+    let handler = handler_with(EMCY_DBC, error_map_of(&[(0x8110, "CAN overrun")]));
+
+    let (msg_name, signals) = handler.decode(frame_100(&EMCY_FRAME)).unwrap();
+
+    assert_eq!(msg_name, "MOTOR_EMCY");
+    // every signal appears exactly once - the first is not duplicated by skip_first
+    assert_eq!(signals.len(), 2);
+    assert_eq!(signals[0].name, "ErrorCode");
+    assert_eq!(signals[0].value, 0x8110 as f64);
+    assert_eq!(signals[0].unit, "CAN overrun");
+    // remaining signals are untouched by the mapping
+    assert_eq!(signals[1].name, "Voltage");
+    assert_eq!(signals[1].value, 100.0);
+    assert_eq!(signals[1].unit, "V");
+}
+
+#[test]
+fn error_frame_falls_back_to_unit_when_code_is_unknown() {
+    let handler = handler_with(EMCY_DBC, error_map_of(&[(0x1234, "Some other fault")]));
+
+    let (_, signals) = handler.decode(frame_100(&EMCY_FRAME)).unwrap();
+
+    assert_eq!(signals.len(), 2);
+    assert_eq!(signals[0].unit, ""); // the DBC unit of ErrorCode
+}
+
+#[test]
+fn error_frame_decodes_normally_when_error_map_is_disabled() {
+    // load_error_map failed at startup - mapping is best-effort, decoding must still work
+    let handler = handler_with(EMCY_DBC, None);
+
+    let (_, signals) = handler.decode(frame_100(&EMCY_FRAME)).unwrap();
+
+    assert_eq!(signals.len(), 2);
+    assert_eq!(signals[0].name, "ErrorCode");
+    assert_eq!(signals[0].value, 0x8110 as f64);
+    assert_eq!(signals[0].unit, "");
+}
+
+#[test]
+fn non_error_frame_is_not_mapped_even_with_a_matching_code() {
+    let dbc_content = EMCY_DBC.replace("MOTOR_EMCY", "MOTOR_STATUS");
+    let handler = handler_with(&dbc_content, error_map_of(&[(0x8110, "CAN overrun")]));
+
+    let (_, signals) = handler.decode(frame_100(&EMCY_FRAME)).unwrap();
+
+    assert_eq!(signals.len(), 2);
+    assert_eq!(signals[0].unit, "");
+}
+
+#[test]
+fn error_frame_with_a_single_signal_is_not_truncated() {
+    // guards the skip(1) arithmetic when the error code is the only signal
+    let dbc_content = r#"
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BO_ 100 MOTOR_EMCY: 8 Vector__XXX
+ SG_ ErrorCode : 0|16@1+ (1,0) [0|65535] "" Vector__XXX
+"#;
+    let handler = handler_with(dbc_content, error_map_of(&[(0x8110, "CAN overrun")]));
+
+    let (_, signals) = handler.decode(frame_100(&EMCY_FRAME)).unwrap();
+
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].unit, "CAN overrun");
+}
+
+#[test]
+fn error_frame_without_signals_yields_no_values() {
+    let dbc_content = r#"
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BO_ 100 MOTOR_EMCY: 8 Vector__XXX
+"#;
+    let handler = handler_with(dbc_content, error_map_of(&[(0x8110, "CAN overrun")]));
+
+    let (_, signals) = handler.decode(frame_100(&EMCY_FRAME)).unwrap();
+
+    assert!(signals.is_empty());
+}
+

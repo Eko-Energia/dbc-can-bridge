@@ -30,6 +30,10 @@ impl App {
         let dbc_handler = DbcHandler::new()?;
 
         info!("DBC loaded: {} message definitions available", dbc_handler.dbc.messages.len());
+
+        if let Some(err_map) = &dbc_handler.error_map {
+            info!("Error Map loaded: {} error mappings available", err_map.len())
+        }
         
         // Get settings from configuration
         let device_port = config::get_device_port()?;
