@@ -47,7 +47,7 @@ fn decode_two_sample_frames() -> Result<()> {
 #[test]
 fn test_decode_signal_value_zero_size() {
     let data = [0x12, 0x34, 0x56, 0x78];
-    let result = decode_signal_value(0, 0, ByteOrder::LittleEndian, ValueType::Unsigned, &data);
+    let result = decode_signal_value(0, 0, ByteOrder::LittleEndian, ValueType::Unsigned, 0.0, 0.0, &data);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Invalid signal size: 0"));
 }
@@ -55,7 +55,7 @@ fn test_decode_signal_value_zero_size() {
 #[test]
 fn test_decode_signal_value_size_exceeds_64() {
     let data = [0x12, 0x34, 0x56, 0x78];
-    let result = decode_signal_value(0, 65, ByteOrder::LittleEndian, ValueType::Unsigned, &data);
+    let result = decode_signal_value(0, 65, ByteOrder::LittleEndian, ValueType::Unsigned,0.0, 0.0, &data);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Invalid signal size: 65"));
 }
