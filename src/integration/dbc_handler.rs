@@ -37,7 +37,8 @@ impl DbcHandler {
         // another debug
         // println!("{:#?}", dbc.messages[map[&130]]);
 
-        let error_map = match load_error_map(find_first_extension_file_in_exe_dir("csv")?) {
+        // both a missing file and a broken file just disable the mapping
+        let error_map = match find_first_extension_file_in_exe_dir("csv").and_then(load_error_map) {
             Ok(map) => Some(map),
             Err(e) => {
                 warn!("Problem with loading error map: {}. Error mapping will be disabled!", e);

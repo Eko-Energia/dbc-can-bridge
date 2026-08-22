@@ -17,6 +17,7 @@ Real-time application for receiving, decoding, and monitoring CAN frames. Suppor
 ## Key Features
 
 - **Automatic CAN decoding**: Full DBC format support
+- **Error code mapping**: Error frame codes translated into readable names from a CSV file
 - **Real-time processing**: Continuous CAN frame reception and processing
 - **WebSocket API**: Remote access to live data
 - **Snapshot + Delta updates**: Optimized data transfer
@@ -27,8 +28,9 @@ Real-time application for receiving, decoding, and monitoring CAN frames. Suppor
 
 1. **Configuration file creation**: The program creates a configuration file and loads settings from it.
 2. **DBC file loading**: Loads and parses a `.dbc` file located in the same directory as the executable.
-3. **CAN frame reading**: Reads CAN frames and decodes them into physical values using the DBC file.
-4. **WebSocket API**: Exposes CAN data via WebSocket on port 8080 with snapshot + delta updates and message filtering.
+3. **Error map loading**: Loads a `.csv` file from the same directory, mapping error codes to readable names - see [Error Code Mapping](#error-code-mapping).
+4. **CAN frame reading**: Reads CAN frames and decodes them into physical values using the DBC file. Empty frames (0 data bytes) are accepted; frames longer than 8 bytes are rejected.
+5. **WebSocket API**: Exposes CAN data via WebSocket on port 8080 with snapshot + delta updates and message filtering.
 
 ## First Run
 
@@ -62,7 +64,8 @@ Real-time application for receiving, decoding, and monitoring CAN frames. Suppor
      - Then try each available device (for example `/dev/ttyUSB0`) until it works.
 
 4. **Place the DBC file**: Put the DBC file in the same directory as the executable.
-5. **Run the program**: Use the same command as above.
+5. **Place the error map**: Put the `.csv` file with error codes in the same directory - see [Error Code Mapping](#error-code-mapping).
+6. **Run the program**: Use the same command as above.
 
 ## Configuration Options
 
@@ -72,6 +75,39 @@ The `config.txt` file (created on first run, see step 3 above) supports the foll
 - `save_logs` - `true`/`false`, default `true` - save logs to a file
 - `can_baud_rate` - CAN bus speed (Waveshare only), default `500k`
 - `broadcast_raw_frames` - `true`/`false`, default `true` - broadcast raw CAN frames over WebSocket, see [WEBSOCKET_API.md](WEBSOCKET_API.md)
+
+## Error Code Mapping
+
+Error frames get their numeric code translated into a readable name, taken from a CSV file placed next to the executable.
+
+### Error map file (CSV)
+
+The first `.csv` file found in the executable's directory is used. The format is one header line (skipped, so its content does not matter) followed by one `code,name` row per error:
+
+```csv
+Error Code,Name
+33040,CAN overrun
+33041,CAN error passive
+33296,Motor overtemperature
+```
+
+- **Codes must be decimal** - hex notation such as `0x8110` is not accepted; write it as `33040`.
+- Whitespace around the code and the name is trimmed.
+- Only the first comma separates the fields, so a name may itself contain commas.
+- A repeated code overwrites the previous entry.
+- A single unparsable code aborts loading of the whole file and disables mapping - lines without any comma are simply skipped.
+
+### What counts as an error frame
+
+A DBC message is treated as an error frame when its **name ends with** `_NODE` or `_EMCY` - for example `MOTOR_EMCY` or `BMS_NODE`. The suffix has to be at the end, so `EMCY_MOTOR` is an ordinary message. The list of suffixes is the `ERROR_SUFFIXES` constant in [src/integration/dbc_handler.rs](src/integration/dbc_handler.rs) and can be changed or extended in code (requires a rebuild).
+
+### Which signal holds the code
+
+By convention it is always the **first signal** of the error frame. Its decoded value is looked up in the CSV and the matching name is returned in that signal's `unit` field (also over the WebSocket API), in place of the DBC unit. The remaining signals of the frame are decoded normally, with their own units.
+
+If the code is not present in the CSV, the DBC unit is used instead. The number of loaded entries is printed at startup.
+
+Mapping is best-effort and the `.csv` file is optional: a missing file and a malformed file are handled the same way - a warning is logged, mapping stays off, and decoding keeps working.
 
 ## Running on ARM64 (with socketcan)
 
