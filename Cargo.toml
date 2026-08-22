@@ -1,6 +1,6 @@
 [package]
 name = "can-receiver"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 authors = []
 license = "MIT"
@@ -9,14 +9,14 @@ license = "MIT"
 can-dbc = "10.0.0"
 color-eyre = "0.6.5"
 embedded-can = "0.4.1"
-log = "0.4.29"
+log = "0.4.33"
 simplelog = "0.12.2"
-time = { version = "0.3.47", features = ["serde"] }
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "net", "sync", "macros"] }
+time = { version = "0.3.55", features = ["serde"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "macros"] }
 tokio-tungstenite = "0.30"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-futures-util = "0.3.32"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+futures-util = "0.3.34"
 
 # for x86_64 devices -> use waveshare_usb_can_a driver
 [target.'cfg(not(all(target_os = "linux", target_arch = "aarch64")))'.dependencies]
