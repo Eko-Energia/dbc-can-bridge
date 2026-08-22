@@ -74,9 +74,12 @@ BO_ 100 TestMessage: 8 Vector__XXX
         &[]
     ).unwrap();
 
+    // Empty frames are supported: a message without signals decodes to no values.
     let result = handler.decode(frame);
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("is either empty or data exceeds 8 bytes"));
+    assert!(result.is_ok());
+    let (msg_name, signals) = result.unwrap();
+    assert_eq!(msg_name, "TestMessage");
+    assert!(signals.is_empty());
 }
 
 #[test]

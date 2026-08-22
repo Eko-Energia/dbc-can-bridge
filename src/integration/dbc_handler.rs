@@ -15,7 +15,7 @@ pub struct SignalValue<'a> {
 
 pub struct DbcHandler {
     pub dbc: Dbc,
-    pub(crate) message_index_by_id: HashMap<u32, (usize, bool)>, // bool means "is error frame"
+    message_index_by_id: HashMap<u32, (usize, bool)>, // bool means "is error frame"
     pub(crate) error_map: Option<HashMap<u32, String>>
 }
 
@@ -55,8 +55,9 @@ impl DbcHandler {
     }
 
     pub fn decode<T: Frame>(&'_ self, frame: T) -> Result<(&'_ String, Vec<SignalValue<'_>>)> {
-        if frame.data().is_empty() || frame.data().len() > 8 {
-            return Err(eyre!("Error: Frame ID: {:?} is either empty or data exceeds 8 bytes!", frame.id()));
+        // we support empty frames
+        if frame.data().len() > 8 {
+            return Err(eyre!("Error: Frame ID: {:?} data exceeds 8 bytes!", frame.id()));
         }
 
         let (idx, is_error_frame) = *self.message_index_by_id
@@ -100,7 +101,7 @@ fn is_error_frame(msg_name: &str) -> bool {
     ERROR_SUFFIXES.iter().any(|s| msg_name.ends_with(s))
 }
 
-pub(crate) fn id_to_u32(id: &Id) -> u32 {
+fn id_to_u32(id: &Id) -> u32 {
     match id {
         Id::Standard(sid) => sid.as_raw() as u32,
         Id::Extended(eid) => eid.as_raw() | 1 << 31,
@@ -117,7 +118,7 @@ pub(crate) fn unpack_id(id: &Id) -> (u32, bool) {
     }
 }
 
-pub(crate) fn decode_signal(signal: &Signal, data: &[u8]) -> Result<f64> {
+fn decode_signal(signal: &Signal, data: &[u8]) -> Result<f64> {
     decode_signal_value(
         signal.start_bit, signal.size, signal.byte_order, signal.value_type, signal.factor, signal.offset, data
     )
@@ -127,7 +128,7 @@ pub(crate) fn decode_signal(signal: &Signal, data: &[u8]) -> Result<f64> {
 /// Decodes a single signal from raw CAN data.
 /// Extracts the raw bits for a signal, converts to signed/unsigned as needed.
 /// Applies factor and offset.
-pub(crate) fn decode_signal_value(
+fn decode_signal_value(
     start_bit: u64,
     size: u64,
     byte_order: ByteOrder,
@@ -183,7 +184,7 @@ pub(crate) fn decode_signal_value(
 /// Extracts raw signal bits from CAN data.
 /// Handles both little-endian and big-endian byte ordering according to
 /// the signal definition.
-pub(crate) fn extract_signal_value(
+fn extract_signal_value(
     data: &[u8],
     start_bit: usize,
     size: usize,

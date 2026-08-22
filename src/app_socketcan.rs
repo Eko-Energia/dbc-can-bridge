@@ -28,6 +28,10 @@ impl App {
         let dbc_handler = Arc::new(DbcHandler::new()?);
 
         info!("DBC loaded: {} message definitions available", dbc_handler.dbc.messages.len());
+
+        if let Some(err_map) = &dbc_handler.error_map {
+            info!("Error Map loaded: {} error mappings available", err_map.len())
+        }
         
         // Get settings from configuration
         let interface_name = config::get_device_port()?;
