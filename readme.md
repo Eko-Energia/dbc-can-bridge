@@ -64,7 +64,7 @@ Real-time application for receiving, decoding, and monitoring CAN frames. Suppor
      - Then try each available device (for example `/dev/ttyUSB0`) until it works.
 
 4. **Place the DBC file**: Put the DBC file in the same directory as the executable.
-5. **Place the error map**: Put the `.csv` file with error codes in the same directory - see [Error Code Mapping](#error-code-mapping).
+5. **Place the error map (optional)**: Put the `.csv` file with error codes in the same directory - see [Error Code Mapping](#error-code-mapping). Without it the program runs normally, only without error name mapping.
 6. **Run the program**: Use the same command as above.
 
 ## Configuration Options

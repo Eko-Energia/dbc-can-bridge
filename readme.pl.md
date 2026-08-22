@@ -64,7 +64,7 @@ Aplikacja real-time do odbierania, dekodowania i monitorowania ramek CAN. Obsłu
      - Następnie wypróbuj każdy z dostępnych, np. `/dev/ttyUSB0`, aż trafisz na dobry i zadziała.
 
 4. **Umieść plik DBC**: Umieść plik DBC w katalogu z plikiem wykonywalnym.
-5. **Umieść mapę błędów**: Umieść plik `.csv` z kodami błędów w katalogu z plikiem wykonywalnym - patrz [Mapowanie kodów błędów](#mapowanie-kodów-błędów).
+5. **Umieść mapę błędów (opcjonalnie)**: Umieść plik `.csv` z kodami błędów w katalogu z plikiem wykonywalnym - patrz [Mapowanie kodów błędów](#mapowanie-kodów-błędów). Bez tego pliku program działa normalnie, tylko bez mapowania nazw błędów.
 6. **Uruchom program**: Użyj polecenia podobnego jak na początku.
 
 ## Opcje konfiguracji
