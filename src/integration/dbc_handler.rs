@@ -1,7 +1,10 @@
 use color_eyre::eyre::{Result, eyre};
-use std::{cmp::min, collections::HashMap, ffi::OsStr, fs, path::PathBuf};
-use can_dbc::{Dbc, ByteOrder, ValueType};
+use std::{cmp::min, collections::HashMap, fs};
+use can_dbc::{ByteOrder, Dbc, Signal, ValueType};
 use embedded_can::{Frame, Id};
+use crate::integration::file_helpers::{find_first_extension_file_in_exe_dir, load_error_map};
+
+const ERROR_SUFFIXES: [&str; 2] = ["_NODE", "_EMCY"];
 
 #[derive(Debug, Clone)]
 pub struct SignalValue<'a> {
@@ -12,39 +15,53 @@ pub struct SignalValue<'a> {
 
 pub struct DbcHandler {
     pub dbc: Dbc,
-    pub(crate) message_index_by_id: HashMap<u32, usize>
+    message_index_by_id: HashMap<u32, (usize, bool)>, // bool means "is error frame"
+    pub(crate) error_map: Option<HashMap<u32, String>>
 }
 
 impl DbcHandler {
     pub fn new() -> Result<Self> {
-        let data = fs::read_to_string(find_first_dbc_in_exe_dir()?)?;
+        let data = fs::read_to_string(find_first_extension_file_in_exe_dir("dbc")?)?;
         let dbc = Dbc::try_from(data.as_str())?;
 
         // for debug purposes
         // println!("{:#?}", dbc);
 
-        let map: HashMap<u32, usize> = dbc
+        let map: HashMap<u32, (usize, bool)> = dbc
             .messages
             .iter()
             .enumerate()
-            .map(|(i, msg)| (msg.id.raw(), i))
+            .map(|(i, msg)| (msg.id.raw(), (i, is_error_frame(&msg.name))))
             .collect();
 
         // another debug
         // println!("{:#?}", dbc.messages[map[&130]]);
 
+        // both a missing file and a broken file just disable the mapping
+        let error_map = match find_first_extension_file_in_exe_dir("csv").and_then(load_error_map) {
+            Ok(map) => Some(map),
+            Err(e) => {
+                warn!("Problem with loading error map: {}. Error mapping will be disabled!", e);
+                None
+            }
+        };
+
+        // println!("{:#?}", error_map);
+
         Ok(DbcHandler {
             dbc,
-            message_index_by_id: map
+            message_index_by_id: map,
+            error_map
         })
     }
 
     pub fn decode<T: Frame>(&'_ self, frame: T) -> Result<(&'_ String, Vec<SignalValue<'_>>)> {
-        if frame.data().is_empty() || frame.data().len() > 8 {
-            return Err(eyre!("Error: Frame ID: {:?} is either empty or data exceeds 8 bytes!", frame.id()));
+        // we support empty frames
+        if frame.data().len() > 8 {
+            return Err(eyre!("Error: Frame ID: {:?} data exceeds 8 bytes!", frame.id()));
         }
 
-        let idx = *self.message_index_by_id
+        let (idx, is_error_frame) = *self.message_index_by_id
             .get(&id_to_u32(&frame.id()))
             .ok_or_else(|| eyre!("No message definition found for frame ID: {:?}", frame.id()))?;
 
@@ -53,16 +70,26 @@ impl DbcHandler {
             .ok_or_else(|| eyre!("Message index {} out of bounds for frame ID: {:?}", idx, frame.id()))?;
 
         let mut results: Vec<SignalValue> = Vec::new();
+        let mut remaining = message.signals.iter();
 
-        for signal in &message.signals {
-            let value = decode_signal_value(
-                signal.start_bit, signal.size, signal.byte_order, signal.value_type, frame.data())?;
-            // decode collected value - apply factor and offset
-            let result = value * signal.factor + signal.offset;
-            // add to a vector
+        // best-effort error mapping
+        // by convention first signal in error frame is an error code
+        if let Some(err_map) = &self.error_map
+            && is_error_frame
+            && let Some(signal) = remaining.next() {
+                let value = decode_signal(signal, frame.data())?;
+                // add to a vector
+                results.push(SignalValue {
+                    name: &signal.name,
+                    value,
+                    unit: err_map.get(&(value.round() as u32)).unwrap_or(&signal.unit)
+                });
+            }
+
+        for signal in remaining {
             results.push(SignalValue {
                 name: &signal.name,
-                value: result,
+                value: decode_signal(signal, frame.data())?,
                 unit: &signal.unit,
             });
         }
@@ -71,25 +98,12 @@ impl DbcHandler {
     }
 }
 
-/// Attempts to find the first .dbc file in the same directory as the running binary.
-/// Returns Ok(None) if none found.
-fn find_first_dbc_in_exe_dir() -> Result<PathBuf> {
-    let mut exe_dir = std::env::current_exe()?;
-    exe_dir.pop();
-
-    if let Ok(read_dir) = fs::read_dir(&exe_dir) {
-        for entry in read_dir.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension() == Some(OsStr::new("dbc")) {
-                return Ok(path)
-            }
-        }
-    }
-    Err(eyre!(format!("No .dbc file found in {:?}", exe_dir)))
+fn is_error_frame(msg_name: &str) -> bool {
+    ERROR_SUFFIXES.iter().any(|s| msg_name.ends_with(s))
 }
 
-pub(crate) fn id_to_u32(id: &Id) -> u32 {
-        match id {
+fn id_to_u32(id: &Id) -> u32 {
+    match id {
         Id::Standard(sid) => sid.as_raw() as u32,
         Id::Extended(eid) => eid.as_raw() | 1 << 31,
     }
@@ -105,14 +119,23 @@ pub(crate) fn unpack_id(id: &Id) -> (u32, bool) {
     }
 }
 
+fn decode_signal(signal: &Signal, data: &[u8]) -> Result<f64> {
+    decode_signal_value(
+        signal.start_bit, signal.size, signal.byte_order, signal.value_type, signal.factor, signal.offset, data
+    )
+}
+
 // inspired by: https://github.com/PurdueElectricRacing/can_decode/
 /// Decodes a single signal from raw CAN data.
-/// Extracts the raw bits for a signal, converts to signed/unsigned as needed
-pub(crate) fn decode_signal_value(
+/// Extracts the raw bits for a signal, converts to signed/unsigned as needed.
+/// Applies factor and offset.
+fn decode_signal_value(
     start_bit: u64,
     size: u64,
     byte_order: ByteOrder,
     value_type: ValueType,
+    factor: f64,
+    offset: f64,
     data: &[u8]
 )-> Result<f64> {
     // Guard rails: avoid shift/underflow for size==0 and shift-out-of-range for size>64
@@ -152,14 +175,17 @@ pub(crate) fn decode_signal_value(
         raw_value as f64
     };
 
-    Ok(raw_value)
+    // decode collected value - apply factor and offset
+    let result = raw_value * factor + offset;
+
+    Ok(result)
 }
 
 // inspired by: https://github.com/PurdueElectricRacing/can_decode/
 /// Extracts raw signal bits from CAN data.
 /// Handles both little-endian and big-endian byte ordering according to
 /// the signal definition.
-pub(crate) fn extract_signal_value(
+fn extract_signal_value(
     data: &[u8],
     start_bit: usize,
     size: usize,

@@ -17,6 +17,7 @@ Aplikacja real-time do odbierania, dekodowania i monitorowania ramek CAN. Obsłu
 ## Główne Cechy
 
 - **Automatyczne dekodowanie CAN**: Pełna obsługa formatu DBC
+- **Mapowanie kodów błędów**: Tłumaczenie kodów z ramek błędów na czytelne nazwy na podstawie pliku CSV
 - **Real-time Processing**: Ciągły odbiór i przetwarzanie ramek CAN
 - **WebSocket API**: Zdalny dostęp do danych w czasie rzeczywistym
 - **Snapshot + Delta Updates**: Optymalizacja transferu danych
@@ -27,8 +28,9 @@ Aplikacja real-time do odbierania, dekodowania i monitorowania ramek CAN. Obsłu
 
 1. **Tworzenie pliku konfiguracyjnego**: Program tworzy plik konfiguracyjny i ładuje z niego konfigurację.
 2. **Ładowanie pliku DBC**: Ładuje i parsuje plik `.dbc` umieszczony w tym samym folderze co plik wykonywalny programu.
-3. **Odczyt ramek CAN**: Odczytuje ramki CAN, dekoduje je na wartość rzeczywistą przy pomocy pliku DBC.
-4. **WebSocket API**: Udostępnia dane CAN przez WebSocket na porcie 8080 z obsługą snapshot + delta updates oraz filtrowaniem wiadomości.
+3. **Ładowanie mapy błędów**: Ładuje plik `.csv` z tego samego folderu, mapujący kody błędów na czytelne nazwy - patrz [Mapowanie kodów błędów](#mapowanie-kodów-błędów).
+4. **Odczyt ramek CAN**: Odczytuje ramki CAN, dekoduje je na wartość rzeczywistą przy pomocy pliku DBC. Puste ramki (0 bajtów danych) są obsługiwane; ramki dłuższe niż 8 bajtów są odrzucane.
+5. **WebSocket API**: Udostępnia dane CAN przez WebSocket na porcie 8080 z obsługą snapshot + delta updates oraz filtrowaniem wiadomości.
 
 ## Pierwsze uruchomienie:
 
@@ -62,7 +64,8 @@ Aplikacja real-time do odbierania, dekodowania i monitorowania ramek CAN. Obsłu
      - Następnie wypróbuj każdy z dostępnych, np. `/dev/ttyUSB0`, aż trafisz na dobry i zadziała.
 
 4. **Umieść plik DBC**: Umieść plik DBC w katalogu z plikiem wykonywalnym.
-5. **Uruchom program**: Użyj polecenia podobnego jak na początku.
+5. **Umieść mapę błędów (opcjonalnie)**: Umieść plik `.csv` z kodami błędów w katalogu z plikiem wykonywalnym - patrz [Mapowanie kodów błędów](#mapowanie-kodów-błędów). Bez tego pliku program działa normalnie, tylko bez mapowania nazw błędów.
+6. **Uruchom program**: Użyj polecenia podobnego jak na początku.
 
 ## Opcje konfiguracji
 
@@ -72,6 +75,39 @@ Plik `config.txt` (tworzony przy pierwszym uruchomieniu, patrz krok 3 powyżej) 
 - `save_logs` - `true`/`false`, domyślnie `true` - zapisywanie logów do pliku
 - `can_baud_rate` - prędkość magistrali CAN (tylko Waveshare), domyślnie `500k`
 - `broadcast_raw_frames` - `true`/`false`, domyślnie `true` - przesyłanie surowych ramek CAN przez WebSocket, patrz [WEBSOCKET_API.md](WEBSOCKET_API.md)
+
+## Mapowanie kodów błędów
+
+Ramki błędów mają swój liczbowy kod tłumaczony na czytelną nazwę, pobieraną z pliku CSV umieszczonego obok pliku wykonywalnego.
+
+### Plik mapy błędów (CSV)
+
+Używany jest pierwszy plik `.csv` znaleziony w katalogu z plikiem wykonywalnym. Format to jedna linia nagłówka (pomijana, więc jej treść nie ma znaczenia), a następnie po jednym wierszu `kod,nazwa` na każdy błąd:
+
+```csv
+Error Code,Name
+33040,CAN overrun
+33041,CAN error passive
+33296,Motor overtemperature
+```
+
+- **Kody muszą być dziesiętne** - notacja szesnastkowa w stylu `0x8110` nie jest akceptowana; należy zapisać ją jako `33040`.
+- Białe znaki wokół kodu i nazwy są obcinane.
+- Pola rozdziela tylko pierwszy przecinek, więc nazwa może zawierać przecinki.
+- Powtórzony kod nadpisuje wcześniejszy wpis.
+- Jeden niepoprawny kod przerywa wczytywanie całego pliku i wyłącza mapowanie - linie bez przecinka są po prostu pomijane.
+
+### Co jest traktowane jako ramka błędu
+
+Wiadomość z pliku DBC jest traktowana jako ramka błędu, gdy jej **nazwa kończy się na** `_NODE` lub `_EMCY` - na przykład `MOTOR_EMCY` albo `BMS_NODE`. Sufiks musi znajdować się na końcu, więc `EMCY_MOTOR` jest zwykłą wiadomością. Lista sufiksów to stała `ERROR_SUFFIXES` w pliku [src/integration/dbc_handler.rs](src/integration/dbc_handler.rs) i można ją zmienić lub rozszerzyć w kodzie (wymaga ponownej kompilacji).
+
+### Który sygnał zawiera kod
+
+Zgodnie z konwencją jest to zawsze **pierwszy sygnał** ramki błędu. Jego zdekodowana wartość jest szukana w pliku CSV, a dopasowana nazwa zwracana jest w polu `unit` tego sygnału (również przez WebSocket API), w miejsce jednostki z pliku DBC. Pozostałe sygnały ramki dekodowane są normalnie, z własnymi jednostkami.
+
+Jeśli kodu nie ma w pliku CSV, użyta zostanie jednostka z DBC. Liczba wczytanych wpisów jest wypisywana przy starcie programu.
+
+Mapowanie działa w trybie best-effort, a plik `.csv` jest opcjonalny: brak pliku i błędny plik są traktowane identycznie - w logach pojawia się ostrzeżenie, mapowanie pozostaje wyłączone, a dekodowanie działa dalej.
 
 ## Uruchomienie na arm64 (z socketcan)
 

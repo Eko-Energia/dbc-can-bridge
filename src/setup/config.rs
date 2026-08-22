@@ -12,12 +12,12 @@ use waveshare_usb_can_a::CanBaudRate;
 const CONFIG_FILE_NAME: &str = "config.txt";
 
 #[derive(Debug, Clone)]
-pub struct Config {
-    pub device_port: String,
-    pub save_logs: bool,
-    pub broadcast_raw_frames: bool,
+struct Config {
+    device_port: String,
+    save_logs: bool,
+    broadcast_raw_frames: bool,
     #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
-    pub can_baud_rate: CanBaudRate,
+    can_baud_rate: CanBaudRate,
 }
 
 impl Default for Config {
@@ -34,7 +34,7 @@ impl Default for Config {
 
 impl Config {
     /// Loads configuration from file or creates default one
-    pub fn load() -> Result<Self> {
+    fn load() -> Result<Self> {
         let config_path = get_config_path()?;
         
         if config_path.exists() {
