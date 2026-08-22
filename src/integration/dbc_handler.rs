@@ -1,6 +1,6 @@
 use color_eyre::eyre::{Result, eyre};
 use std::{cmp::min, collections::HashMap, fs};
-use can_dbc::{Dbc, ByteOrder, ValueType};
+use can_dbc::{ByteOrder, Dbc, Signal, ValueType};
 use embedded_can::{Frame, Id};
 use crate::integration::file_helpers::{find_first_extension_file_in_exe_dir, load_error_map};
 
@@ -68,36 +68,26 @@ impl DbcHandler {
             .ok_or_else(|| eyre!("Message index {} out of bounds for frame ID: {:?}", idx, frame.id()))?;
 
         let mut results: Vec<SignalValue> = Vec::new();
-
-        let mut skip_first = 0;
+        let mut remaining = message.signals.iter();
 
         // best-effort error mapping
         // by convention first signal in error frame is an error code
         if let Some(err_map) = &self.error_map
             && is_error_frame
-            && let Some(first_signal) = message.signals.first() {
-
-                let value = decode_signal_value(
-                    first_signal.start_bit, first_signal.size, first_signal.byte_order, first_signal.value_type,
-                    first_signal.factor, first_signal.offset, frame.data())?;
+            && let Some(signal) = remaining.next() {
+                let value = decode_signal(signal, frame.data())?;
                 // add to a vector
                 results.push(SignalValue {
-                    name: &first_signal.name,
+                    name: &signal.name,
                     value,
-                    unit: err_map.get(&(value.round() as u32)).unwrap_or(&first_signal.unit)
+                    unit: err_map.get(&(value.round() as u32)).unwrap_or(&signal.unit)
                 });
-
-                skip_first = 1;
-                
             }
 
-        for signal in message.signals.iter().skip(skip_first) {
-            let value = decode_signal_value(
-                signal.start_bit, signal.size, signal.byte_order, signal.value_type, signal.factor, signal.offset, frame.data())?;
-            // add to a vector
+        for signal in remaining {
             results.push(SignalValue {
                 name: &signal.name,
-                value,
+                value: decode_signal(signal, frame.data())?,
                 unit: &signal.unit,
             });
         }
@@ -111,7 +101,7 @@ fn is_error_frame(msg_name: &str) -> bool {
 }
 
 pub(crate) fn id_to_u32(id: &Id) -> u32 {
-        match id {
+    match id {
         Id::Standard(sid) => sid.as_raw() as u32,
         Id::Extended(eid) => eid.as_raw() | 1 << 31,
     }
@@ -125,6 +115,12 @@ pub(crate) fn unpack_id(id: &Id) -> (u32, bool) {
         Id::Standard(s) => (s.as_raw() as u32, false),
         Id::Extended(e) => (e.as_raw(), true),
     }
+}
+
+pub(crate) fn decode_signal(signal: &Signal, data: &[u8]) -> Result<f64> {
+    decode_signal_value(
+        signal.start_bit, signal.size, signal.byte_order, signal.value_type, signal.factor, signal.offset, data
+    )
 }
 
 // inspired by: https://github.com/PurdueElectricRacing/can_decode/
